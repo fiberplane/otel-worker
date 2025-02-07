@@ -3,7 +3,6 @@ use clap::{Parser, Subcommand};
 
 mod schemas;
 
-/// FPX - Super-charge your local development.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 pub struct Args {
