@@ -39,7 +39,7 @@ reqwest = { version = "0.12", optional = true, default-features = false, feature
     "rustls-tls",
     "json",
 ] }
-schemars = { workspace = true, default-features = false, features = ["derive"] }
+schemars = { workspace = true, features = ["derive"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false }
 strum = { version = "0.26", default-features = false, features = ["derive"] }
