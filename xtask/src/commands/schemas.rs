@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fpx::api::models::{ClientMessage, ServerMessage};
+use otel_worker_core::api::models::{ClientMessage, ServerMessage};
 use schemars::schema::RootSchema;
 use schemars::schema_for;
 use serde_json::Value;

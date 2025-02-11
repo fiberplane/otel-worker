@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["fpx-cli", "fpx", "fpx-workers", "fpx-macros", "xtask"]
+members = [
+    "otel-worker-cli",
+    "otel-worker-core",
+    "otel-worker-macros",
+    "otel-worker",
+    "xtask",
+]
 
 [workspace.package]
 authors = ["Fiberplane <info@fiberplane.com>"]
