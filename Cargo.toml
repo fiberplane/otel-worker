@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "otel-worker-cli",
+    "otel-worker-core",
+    "otel-worker-macros",
+    "otel-worker",
+    "xtask",
+]
+
+[workspace.package]
+authors = ["Fiberplane <info@fiberplane.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fiberplane/otel-worker"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = { version = "1.0" }
+axum = { version = "0.7", default-features = false }
+clap = { version = "4.0", features = ["derive", "env"] }
+schemars = { version = "0.8.21", default-features = false }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0" }
+tokio = { version = "1.40", features = ["rt-multi-thread", "signal"] }
+tracing = { version = "0.1" }
+url = { version = "2.5" }
