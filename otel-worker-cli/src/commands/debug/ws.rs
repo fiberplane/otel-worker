@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
-use otel_worker_core::api::models::FPX_WEBSOCKET_ID_HEADER;
+use otel_worker_core::api::OTEL_WORKER_WEBSOCKET_ID_HEADER;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -62,7 +62,7 @@ pub async fn handle_command(args: Args) -> Result<()> {
 fn extract_id<T>(resp: &http::Response<T>) -> Option<u32> {
     let id = resp
         .headers()
-        .get(FPX_WEBSOCKET_ID_HEADER)
+        .get(OTEL_WORKER_WEBSOCKET_ID_HEADER)
         .and_then(|header| header.to_str().ok().and_then(|value| value.parse().ok()));
 
     id

@@ -5,10 +5,6 @@ mod otel;
 
 pub use otel::*;
 
-/// The header that will be returned on the initial websocket connection. This
-/// could be useful for debugging purposes.
-pub const FPX_WEBSOCKET_ID_HEADER: &str = "fpx-websocket-id";
-
 /// Messages that are send from the server to the client.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]

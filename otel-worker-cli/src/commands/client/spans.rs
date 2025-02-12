@@ -38,7 +38,7 @@ pub struct GetArgs {
     /// SpanID - hex encoded
     pub span_id: String,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }
@@ -58,7 +58,7 @@ pub struct ListArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }
@@ -81,7 +81,7 @@ pub struct DeleteArgs {
     /// SpanID - hex encoded
     pub span_id: String,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }

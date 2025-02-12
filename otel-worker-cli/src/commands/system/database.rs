@@ -1,6 +1,6 @@
-use crate::find_fpx_dir;
 use anyhow::Result;
 use clap::Subcommand;
+use otel_worker_core::config::{find_otel_worker_dir, DATABASE_FILENAME};
 use std::path::PathBuf;
 use tracing::{error, info, warn};
 
@@ -9,14 +9,14 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Command,
 
-    /// fpx directory
+    /// otel worker directory
     #[arg(from_global)]
-    pub fpx_directory: Option<PathBuf>,
+    pub otel_worker_directory: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Delete the database files from the fpx directory.
+    /// Delete the database files from the otel-worker directory.
     Delete,
 }
 
@@ -27,12 +27,13 @@ pub async fn handle_command(args: Args) -> Result<()> {
 }
 
 pub async fn handle_delete_database(args: Args) -> Result<()> {
-    let Some(fpx_directory) = args.fpx_directory.or_else(find_fpx_dir) else {
-        warn!("Unable to find fpx directory, skipped deleting database");
+    let Some(otel_worker_directory) = args.otel_worker_directory.or_else(find_otel_worker_dir)
+    else {
+        warn!("Unable to find otel-worker directory, skipped deleting database");
         return Ok(());
     };
 
-    match tokio::fs::remove_file(fpx_directory.join("fpx.db")).await {
+    match tokio::fs::remove_file(otel_worker_directory.join(DATABASE_FILENAME)).await {
         Ok(_) => info!("Database deleted"),
         Err(err) => error!(?err, "Failed to delete database"),
     };

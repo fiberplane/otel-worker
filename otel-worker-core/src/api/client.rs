@@ -1,4 +1,4 @@
-//! API client for the FPX API.
+//! API client for the otel-worker API.
 //!
 //! Eventually this should be moved into its own crate and not be part of the
 //! api module. But for now this is only used within our own code, so it is
@@ -30,12 +30,12 @@ pub struct ApiClient {
 impl ApiClient {
     /// Create a new ApiClient with a default [`reqwest::Client`].
     ///
-    /// [`base_url`] should be the host of the fpx API, with optionally a port
-    /// and a path (in case you are doing path based routing).
+    /// [`base_url`] should be the host of the otel-worker API, with optionally
+    /// a port and a path (in case you are doing path based routing).
     pub fn new(base_url: Url) -> Self {
         let version = env!("CARGO_PKG_VERSION");
         let client = reqwest::Client::builder()
-            .user_agent(format!("fpx/{version}"))
+            .user_agent(format!("otel-worker/{version}"))
             .build()
             .expect("should be able to create reqwest client");
 
@@ -47,7 +47,7 @@ impl ApiClient {
         Self { client, base_url }
     }
 
-    /// Perform a request using fpx API's convention.
+    /// Perform a request using otel-worker API's convention.
     ///
     /// This means that it will try to parse the response as [`T`]. If that
     /// fails it will consider the call as failed and will try to parse the body
@@ -271,9 +271,9 @@ mod tests {
     use super::*;
     use crate::api::errors::ApiServerError;
     use axum::response::IntoResponse;
-    use fpx_macros::ApiError;
     use http::StatusCode;
     use http_body_util::BodyExt;
+    use otel_worker_macros::ApiError;
     use serde::{Deserialize, Serialize};
     use thiserror::Error;
     use tracing::error;

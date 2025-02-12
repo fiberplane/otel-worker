@@ -5,8 +5,7 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{runtime, Resource};
 use std::env;
-use std::path::PathBuf;
-use tracing::{error, trace};
+use tracing::trace;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -34,9 +33,25 @@ async fn main() -> Result<()> {
     result
 }
 
+/// Log directives that uses info for all otel_worker related crates and error
+/// for everything else.
+const DEFAULT_LOG_DIRECTIVES: &str = "otel_worker=info,error";
+
+/// Log directives that uses debug for all otel_worker related crates and info
+/// for everything else.
+const DEBUG_LOG_DIRECTIVES: &str = "otel_worker=debug,info";
+
 fn setup_tracing(args: &commands::Args) -> Result<()> {
     let filter_layer = {
-        let directives = env::var("RUST_LOG").unwrap_or_else(|_| "fpx=info,error".to_string());
+        let rust_log = env::var("RUST_LOG");
+        let directives = rust_log.as_deref().unwrap_or_else(|_| {
+            if args.debug {
+                DEBUG_LOG_DIRECTIVES
+            } else {
+                DEFAULT_LOG_DIRECTIVES
+            }
+        });
+
         EnvFilter::builder().parse(directives)?
     };
 
@@ -50,13 +65,16 @@ fn setup_tracing(args: &commands::Args) -> Result<()> {
 
         // This tracer is responsible for sending the actual traces.
         let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_resource(Resource::new(vec![KeyValue::new("service.name", "fpx")]))
+            .with_resource(Resource::new(vec![KeyValue::new(
+                "service.name",
+                "otel-worker-cli",
+            )]))
             .with_batch_exporter(exporter, runtime::Tokio)
             .build();
 
         opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
-        let tracer = tracer_provider.tracer("fpx");
+        let tracer = tracer_provider.tracer("otel-worker-cli");
 
         // This layer will take the traces from the `tracing` crate and send
         // them to the tracer specified above.
@@ -77,66 +95,4 @@ fn setup_tracing(args: &commands::Args) -> Result<()> {
 
 fn shutdown_tracing() {
     opentelemetry::global::shutdown_tracer_provider();
-}
-
-/// Ensure that the fpx directory exists and is initialized. It will return a
-/// path to the fpx directory.
-///
-/// If override_path is provided than that path is used as the fpx directory. It
-/// won't delete anything in that directory.
-///
-/// If no [`override_path`] is provided, it will search for the fpx directory
-/// using the algorithm described in [`find_fpx_dir`]. If no directory is found,
-/// then a .fpx directory is created in the current directory.
-async fn initialize_fpx_dir(override_path: &Option<PathBuf>) -> Result<PathBuf> {
-    trace!("Initializing fpx directory");
-    let path = match override_path {
-        Some(path) => {
-            trace!(fpx_directory = ?path, "Using override path for fpx directory");
-            path.to_path_buf()
-        }
-        None => match find_fpx_dir() {
-            Some(path) => {
-                trace!(fpx_directory = ?path, "Found fpx directory in a parent directory");
-                path
-            }
-            None => {
-                let path = env::current_dir()?.join(".fpx");
-                trace!(fpx_directory = ?path, "No fpx directory found, using the current directory");
-                path
-            }
-        },
-    };
-
-    // Create top level .fpx directory
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .create(&path)
-        .with_context(|| format!("Failed to create fpx working directory: {:?}", path))?;
-
-    Ok(path)
-}
-
-/// Find the fpx directory in the current directory or any parent directories.
-/// This returns [`None`] if no fpx directory is found.
-///
-/// Any directory that is named `.fpx` is considered the fpx directory.
-fn find_fpx_dir() -> Option<PathBuf> {
-    let Ok(cwd) = env::current_dir() else {
-        error!("Failed to get current directory");
-        return None;
-    };
-
-    let mut dir = Some(cwd);
-    while let Some(inner_dir) = dir {
-        let fpx_dir = inner_dir.join(".fpx");
-
-        if fpx_dir.is_dir() {
-            return Some(fpx_dir);
-        }
-
-        dir = inner_dir.parent().map(Into::into);
-    }
-
-    None
 }

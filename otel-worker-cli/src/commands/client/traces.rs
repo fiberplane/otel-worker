@@ -35,7 +35,7 @@ pub struct GetArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }
@@ -52,7 +52,7 @@ async fn handle_get(args: GetArgs) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }
@@ -72,7 +72,7 @@ pub struct DeleteArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
 }

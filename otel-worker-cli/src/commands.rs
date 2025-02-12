@@ -8,7 +8,7 @@ pub mod debug;
 pub mod dev;
 pub mod system;
 
-/// FPX - Super-charge your local development.
+/// otel-worker - store and query traces
 #[derive(Parser, Debug)]
 #[command(name = "otel-worker-cli", version)]
 pub struct Args {
@@ -23,18 +23,25 @@ pub struct Args {
     #[clap(long, env, default_value = "http://localhost:4317")]
     pub otlp_endpoint: Url,
 
-    /// Change the fpx directory.
+    /// Change the otel-worker directory.
     ///
-    /// By default fpx will search for a `.fpx` directory in the current
-    /// directory or its ancestors. If it wasn't found it will create a `.fpx`
-    /// directory in the current directory.
+    /// By default otel-worker will search for the first `.otel-worker`
+    /// directory in the current directory and its ancestors. If it wasn't found
+    /// it will create a `.otel-worker` directory in the current directory.
     #[arg(global = true, short, long, env)]
-    pub fpx_directory: Option<PathBuf>,
+    pub otel_worker_directory: Option<PathBuf>,
+
+    /// Changes the log level to DEBUG for the otel-worker components and sets
+    /// the log level to info for all other components.
+    ///
+    /// Note that this will get ignored if `$RUST_LOG` is set.
+    #[arg(global = true, short, long, env)]
+    pub debug: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// A cli client to interact with a running fpx dev server.
+    /// A cli client to interact with a running otel-worker server.
     Client(client::Args),
 
     /// Debug related commands.

@@ -36,7 +36,8 @@ npx wrangler dev
 
 The Rust code will be compiled and once that is finished a local server will be
 running on `http://localhost:8787`. You can send traces using any OTLP/HTTP
-compatible exporter and inspect the traces using the [`client`](../fpx-cli).
+compatible exporter and inspect the traces using the
+[`client`](../otel-worker-cli).
 
 ## Deploying to Cloudflare
 

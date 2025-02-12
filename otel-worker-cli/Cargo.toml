@@ -24,7 +24,7 @@ bytes = { version = "1.6" }
 clap = { workspace = true, features = ["derive", "env"] }
 otel-worker-core = { version = "0.1.0", path = "../otel-worker-core", features = [
     "libsql",
-    "fpx_client",
+    "client",
 ] }
 otel-worker-macros = { version = "0.1.0", path = "../otel-worker-macros" }
 futures-util = { version = "0.3" }

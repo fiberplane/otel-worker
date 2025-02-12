@@ -10,7 +10,7 @@ version = { workspace = true }
 [lib]
 
 [features]
-fpx_client = ["dep:reqwest"]
+client = ["dep:reqwest"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }

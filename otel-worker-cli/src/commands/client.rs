@@ -10,7 +10,7 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Base url of the fpx dev server.
+    /// Base url of the otel-worker server.
     #[arg(
         global = true,
         short,

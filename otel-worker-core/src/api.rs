@@ -7,11 +7,15 @@ use http::StatusCode;
 use tower_http::compression::CompressionLayer;
 use tower_http::decompression::RequestDecompressionLayer;
 
-#[cfg(feature = "fpx_client")]
+#[cfg(feature = "client")]
 pub mod client;
 pub mod errors;
 pub mod handlers;
 pub mod models;
+
+/// The header that will be returned on the initial websocket connection. This
+/// could be useful for debugging purposes.
+pub const OTEL_WORKER_WEBSOCKET_ID_HEADER: &str = "otel-worker-websocket-id";
 
 #[derive(Clone)]
 pub struct ApiState {

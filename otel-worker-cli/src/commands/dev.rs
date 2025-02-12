@@ -1,10 +1,11 @@
 use crate::data::LibsqlStore;
 use crate::events::InMemoryEvents;
 use crate::grpc::GrpcService;
-use crate::initialize_fpx_dir;
 use anyhow::{Context, Result};
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
-use otel_worker_core::{api, service};
+use otel_worker_core::api;
+use otel_worker_core::config::{initialize_otel_worker_dir, DATABASE_FILENAME};
+use otel_worker_core::service;
 use std::future::IntoFuture;
 use std::path::PathBuf;
 use std::process::exit;
@@ -30,18 +31,18 @@ pub struct Args {
     #[clap(long, env, hide = true)]
     pub in_memory_database: bool,
 
-    /// fpx directory
+    /// otel-worker directory
     #[arg(from_global)]
-    pub fpx_directory: Option<PathBuf>,
+    pub otel_worker_directory: Option<PathBuf>,
 }
 
 pub async fn handle_command(args: Args) -> Result<()> {
-    let fpx_directory = initialize_fpx_dir(&args.fpx_directory).await?;
+    let config_directory = initialize_otel_worker_dir(&args.otel_worker_directory)?;
 
     let store = if args.in_memory_database {
         LibsqlStore::in_memory().await?
     } else {
-        LibsqlStore::file(&fpx_directory.join("fpx.db")).await?
+        LibsqlStore::file(&config_directory.join(DATABASE_FILENAME)).await?
     };
 
     LibsqlStore::migrate(&store).await?;
