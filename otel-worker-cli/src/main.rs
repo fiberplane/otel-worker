@@ -44,7 +44,7 @@ const DEBUG_LOG_DIRECTIVES: &str = "otel_worker=debug,info";
 fn setup_tracing(args: &commands::Args) -> Result<()> {
     let filter_layer = {
         let rust_log = env::var("RUST_LOG");
-        let directives = rust_log.as_deref().unwrap_or_else(|_| {
+        let directives = rust_log.as_deref().unwrap_or({
             if args.debug {
                 DEBUG_LOG_DIRECTIVES
             } else {
