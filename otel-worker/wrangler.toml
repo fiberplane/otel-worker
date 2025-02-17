@@ -26,6 +26,3 @@ watch_dir = [
 [[migrations]]
 tag = "v1"
 new_classes = ["WebSocketHibernationServer"]
-
-[vars]
-AUTH_TOKEN = "your-secret-token-here"
