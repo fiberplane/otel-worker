@@ -54,7 +54,7 @@ async fn fetch(
     let boxed_store = Arc::new(store);
 
     let auth_token = env
-        .var("AUTH_TOKEN")
+        .secret("AUTH_TOKEN")
         .expect("no auth token is set")
         .to_string();
 
