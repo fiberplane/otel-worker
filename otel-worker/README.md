@@ -10,7 +10,9 @@ endpoint to receive realtime notification about newly added traces.
 ## Authentication
 
 The `otel-worker` allows for a simple bearer token authentication. This token is
-required by the OTLP/HTTP endpoints and the traces endpoints.
+required by the OTLP/HTTP endpoints and the traces endpoints. 
+
+You can configure the token using the `AUTH_TOKEN` environment variable (see below).
 
 ## Local development
 
