@@ -45,6 +45,9 @@ AUTH_TOKEN="your-secret-token-here"
 
 You can now run `otel-worker` using the wrangler CLI:
 
+> **Note**: Compiling the Worker is not supported on Windows at the moment
+> without WSL.
+
 ```sh
 npx wrangler dev
 ```
