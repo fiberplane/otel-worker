@@ -62,7 +62,12 @@ compatible exporter and inspect the traces using the
 If you want to deploy this worker to Cloudflare you will require a paid account
 (since this worker uses Durable Objects). You still need to go through the same
 steps to create a database, but remember to add the `--remote` flag when running
-the d1 commands.
+the D1 commands.
+
+```sh
+# Migrate production database
+npx wrangler d1 migrations apply fiberplane-otel-db --remote
+```
 
 After the database has been created and the migrations have been applied, you
 need run the following command to compile the worker and upload it to your
