@@ -1,14 +1,11 @@
 use anyhow::{Context, Result};
 use axum::routing::post;
-use axum_jrpc::{
-    error::{JsonRpcError, JsonRpcErrorReason},
-    JsonRpcExtractor, JsonRpcResponse, Value,
-};
+use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
+use axum_jrpc::{JsonRpcExtractor, JsonRpcResponse, Value};
 use rust_mcp_schema::{
-    Implementation, InitializeRequestParams, InitializeResult, ListResourcesRequest,
-    ListResourcesRequestParams, ListResourcesResult, ServerCapabilities,
+    Implementation, InitializeRequestParams, InitializeResult, ListResourcesRequestParams,
+    ListResourcesResult, ServerCapabilities,
 };
-use serde::Serialize;
 use std::{path::PathBuf, process::exit};
 use tracing::{error, info, warn};
 
@@ -129,7 +126,7 @@ async fn handle_initialize(params: InitializeRequestParams) -> Result<Initialize
     Ok(result)
 }
 
-async fn handle_resources_list(params: ListResourcesRequestParams) -> Result<ListResourcesResult> {
+async fn handle_resources_list(_params: ListResourcesRequestParams) -> Result<ListResourcesResult> {
     todo!()
 }
 
