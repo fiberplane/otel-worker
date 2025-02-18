@@ -35,13 +35,16 @@ pub struct GetArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
 async fn handle_get(args: GetArgs) -> Result<()> {
-    let api_client = ApiClient::new(args.base_url.clone());
+    let mut api_client = ApiClient::new(args.base_url.clone());
+    api_client.set_bearer_token(args.auth_token);
 
     let result = api_client.trace_get(args.trace_id).await?;
 
@@ -52,13 +55,16 @@ async fn handle_get(args: GetArgs) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
 async fn handle_list(args: ListArgs) -> Result<()> {
-    let api_client = ApiClient::new(args.base_url.clone());
+    let mut api_client = ApiClient::new(args.base_url.clone());
+    api_client.set_bearer_token(args.auth_token);
 
     let result = api_client.trace_list().await?;
 
@@ -72,13 +78,16 @@ pub struct DeleteArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
 async fn handle_delete(args: DeleteArgs) -> Result<()> {
-    let api_client = ApiClient::new(args.base_url.clone());
+    let mut api_client = ApiClient::new(args.base_url.clone());
+    api_client.set_bearer_token(args.auth_token);
 
     api_client.trace_delete(args.trace_id).await?;
 
