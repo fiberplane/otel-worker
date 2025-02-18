@@ -19,6 +19,10 @@ pub struct Args {
         default_value = "http://127.0.0.1:6767"
     )]
     pub base_url: Url,
+
+    /// Bearer token for authentication.
+    #[arg(global = true, short, long, env = "AUTH_TOKEN")]
+    pub auth_token: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
