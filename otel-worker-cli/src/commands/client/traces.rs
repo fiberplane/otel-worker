@@ -22,11 +22,11 @@ pub enum Command {
     Delete(DeleteArgs),
 }
 
-pub async fn handle_command(args: Args, auth_token: Option<String>) -> Result<()> {
+pub async fn handle_command(args: Args) -> Result<()> {
     match args.command {
-        Command::Get(args) => handle_get(args, auth_token).await,
-        Command::List(args) => handle_list(args, auth_token).await,
-        Command::Delete(args) => handle_delete(args, auth_token).await,
+        Command::Get(args) => handle_get(args).await,
+        Command::List(args) => handle_list(args).await,
+        Command::Delete(args) => handle_delete(args).await,
     }
 }
 
@@ -35,16 +35,16 @@ pub struct GetArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
-async fn handle_get(args: GetArgs, auth_token: Option<String>) -> Result<()> {
+async fn handle_get(args: GetArgs) -> Result<()> {
     let mut api_client = ApiClient::new(args.base_url.clone());
-    if let Some(token) = auth_token {
-        api_client = api_client.with_bearer_token(token);
-    }
+    api_client.set_bearer_token(args.auth_token);
 
     let result = api_client.trace_get(args.trace_id).await?;
 
@@ -55,16 +55,16 @@ async fn handle_get(args: GetArgs, auth_token: Option<String>) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
-async fn handle_list(args: ListArgs, auth_token: Option<String>) -> Result<()> {
+async fn handle_list(args: ListArgs) -> Result<()> {
     let mut api_client = ApiClient::new(args.base_url.clone());
-    if let Some(token) = auth_token {
-        api_client = api_client.with_bearer_token(token);
-    }
+    api_client.set_bearer_token(args.auth_token);
 
     let result = api_client.trace_list().await?;
 
@@ -78,16 +78,16 @@ pub struct DeleteArgs {
     /// TraceID - hex encoded
     pub trace_id: String,
 
-    /// Base url of the otel-worker server.
     #[arg(from_global)]
     pub base_url: Url,
+
+    #[arg(from_global)]
+    pub auth_token: Option<String>,
 }
 
-async fn handle_delete(args: DeleteArgs, auth_token: Option<String>) -> Result<()> {
+async fn handle_delete(args: DeleteArgs) -> Result<()> {
     let mut api_client = ApiClient::new(args.base_url.clone());
-    if let Some(token) = auth_token {
-        api_client = api_client.with_bearer_token(token);
-    }
+    api_client.set_bearer_token(args.auth_token);
 
     api_client.trace_delete(args.trace_id).await?;
 
