@@ -6,6 +6,7 @@ use url::Url;
 pub mod client;
 pub mod debug;
 pub mod dev;
+pub mod mcp;
 pub mod system;
 mod util;
 
@@ -55,6 +56,8 @@ pub enum Command {
 
     /// System related commands.
     System(system::Args),
+
+    Mcp(mcp::Args),
 }
 
 pub async fn handle_command(args: Args) -> Result<()> {
@@ -63,5 +66,6 @@ pub async fn handle_command(args: Args) -> Result<()> {
         Command::Debug(args) => debug::handle_command(args).await,
         Command::Dev(args) => dev::handle_command(args).await,
         Command::System(args) => system::handle_command(args).await,
+        Command::Mcp(args) => mcp::handle_command(args).await,
     }
 }

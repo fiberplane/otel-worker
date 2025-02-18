@@ -260,6 +260,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "axum-jrpc"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4d43309d9b4aa9a30523ea666138c5eca3af65d226c766c02c3042da63a08a2"
+dependencies = [
+ "async-trait",
+ "axum",
+ "cfg-if",
+ "mime",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1569,6 +1584,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "axum-jrpc",
  "bytes",
  "clap",
  "futures-util",
@@ -1586,6 +1602,7 @@ dependencies = [
  "otel-worker-macros",
  "prost",
  "rand",
+ "rust-mcp-schema",
  "schemars",
  "serde",
  "serde_json",
@@ -1983,6 +2000,16 @@ dependencies = [
  "spin",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rust-mcp-schema"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f91f421769adc2ff7e13daa277a61abff6c8eeb6cf8ae89508f5d59b7baf6306"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2661,6 +2688,7 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
