@@ -25,6 +25,7 @@ use url::Url;
 pub struct ApiClient {
     client: reqwest::Client,
     base_url: Url,
+    bearer_token: Option<String>,
 }
 
 impl ApiClient {
@@ -44,7 +45,17 @@ impl ApiClient {
 
     /// Create a new ApiClient with a custom [`reqwest::Client`].
     pub fn with_client(client: reqwest::Client, base_url: Url) -> Self {
-        Self { client, base_url }
+        Self { 
+            client, 
+            base_url,
+            bearer_token: None,
+        }
+    }
+
+    /// Set the bearer token for authentication
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.bearer_token = Some(token.into());
+        self
     }
 
     /// Perform a request using otel-worker API's convention.
@@ -66,20 +77,26 @@ impl ApiClient {
     {
         let u = self.base_url.join(path.as_ref())?;
 
-        let req = self.client.request(method, u);
+        let mut req = self.client.request(method, u);
 
         // Take the current otel context, and inject those details into the
         // Request using the TraceContext format.
-        let req = {
-            let mut headers = HeaderMap::new();
-            let propagator = TraceContextPropagator::new();
+        let mut headers = HeaderMap::new();
+        let propagator = TraceContextPropagator::new();
 
-            let context = tracing::Span::current().context();
-            let mut header_injector = HeaderMapInjector(&mut headers);
-            propagator.inject_context(&context, &mut header_injector);
+        let context = tracing::Span::current().context();
+        let mut header_injector = HeaderMapInjector(&mut headers);
+        propagator.inject_context(&context, &mut header_injector);
 
-            req.headers(headers)
-        };
+        // Add bearer token if present
+        if let Some(token) = &self.bearer_token {
+            headers.insert(
+                http::header::AUTHORIZATION,
+                format!("Bearer {}", token).parse().unwrap(),
+            );
+        }
+
+        req = req.headers(headers);
 
         // Send the request
         let response = req.send().await?;
