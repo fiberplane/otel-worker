@@ -9,7 +9,6 @@ use http::StatusCode;
 use http::{HeaderMap, HeaderValue};
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
-use serde::Deserialize;
 use tracing::error;
 
 /// Collect trace data using the http as the transport and either json or
