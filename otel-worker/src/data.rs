@@ -103,7 +103,7 @@ impl Store for D1Store {
         trace_id: &HexEncodedId,
     ) -> Result<Vec<models::Span>> {
         SendFuture::new(async {
-            self.fetch_all(self.sql_builder.span_list_by_trace(), &[trace_id.into()])
+            self.fetch_all(self.sql_builder.span_list_by_trace(None), &[trace_id.into()])
                 .await
         })
         .await

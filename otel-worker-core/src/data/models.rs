@@ -72,7 +72,7 @@ impl From<api::models::Span> for Span {
 
 #[derive(Deserialize)]
 pub struct QueryParams {
-    limit: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]

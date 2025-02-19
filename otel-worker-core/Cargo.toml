@@ -18,6 +18,7 @@ async-trait = { version = "0.1", default-features = false }
 axum = { workspace = true, default-features = false, features = [
     "json",
     "matched-path",
+    "query"
 ] }
 bytes = { version = "1.0", default-features = false }
 otel-worker-macros = { version = "0.1.0", path = "../otel-worker-macros" }
