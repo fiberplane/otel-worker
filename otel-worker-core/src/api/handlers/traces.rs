@@ -1,8 +1,8 @@
 use crate::api::errors::{ApiServerError, CommonError};
 use crate::api::models::TraceSummary;
-use crate::data::models::HexEncodedId;
+use crate::data::models::{HexEncodedId, QueryParams};
 use crate::data::{BoxedStore, DbError};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use http::StatusCode;
 use otel_worker_macros::ApiError;
@@ -13,10 +13,11 @@ use tracing::error;
 #[tracing::instrument(skip_all)]
 pub async fn traces_list_handler(
     State(store): State<BoxedStore>,
+    Query(QueryParams { limit }): Query<QueryParams>,
 ) -> Result<Json<Vec<TraceSummary>>, ApiServerError<TraceListError>> {
     let tx = store.start_readonly_transaction().await?;
 
-    let traces = store.traces_list(&tx).await?;
+    let traces = store.traces_list(&tx, limit).await?;
 
     let mut result = Vec::with_capacity(20);
 

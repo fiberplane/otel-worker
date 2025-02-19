@@ -178,11 +178,11 @@ impl Store for LibsqlStore {
     async fn traces_list(
         &self,
         _tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
     ) -> Result<Vec<otel_worker_core::data::models::Trace>> {
         let traces = self
             .connection
-            .query(&self.sql_builder.traces_list(None), ())
+            .query(&self.sql_builder.traces_list(limit), ())
             .await?
             .fetch_all()
             .await?;

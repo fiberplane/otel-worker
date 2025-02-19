@@ -70,6 +70,11 @@ impl From<api::models::Span> for Span {
     }
 }
 
+#[derive(Deserialize)]
+pub struct QueryParams {
+    limit: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct HexEncodedId(String);
 

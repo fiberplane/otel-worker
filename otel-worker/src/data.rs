@@ -146,11 +146,11 @@ impl Store for D1Store {
     async fn traces_list(
         &self,
         _tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
     ) -> Result<Vec<models::Trace>> {
         SendFuture::new(async {
             let traces = self
-                .fetch_all(self.sql_builder.traces_list(None), &[])
+                .fetch_all(self.sql_builder.traces_list(limit), &[])
                 .await?;
 
             Ok(traces)

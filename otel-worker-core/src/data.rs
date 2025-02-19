@@ -68,7 +68,7 @@ pub trait Store: Send + Sync {
     async fn traces_list(
         &self,
         tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
     ) -> Result<Vec<models::Trace>>;
 
     /// Delete all spans with a specific trace_id.

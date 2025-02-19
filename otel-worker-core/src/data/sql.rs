@@ -35,8 +35,11 @@ impl SqlBuilder {
     ///
     /// Query parameters:
     /// - $1: trace_id
-    pub fn span_list_by_trace(&self) -> String {
-        String::from("SELECT * FROM spans WHERE trace_id=$1")
+    pub fn span_list_by_trace(&self, limit: Option<u32>) -> String {
+        format!(
+            "SELECT * FROM spans WHERE trace_id=$1 LIMIT {}",
+            limit.unwrap_or(100)
+        )
     }
 
     /// Create a new span.
