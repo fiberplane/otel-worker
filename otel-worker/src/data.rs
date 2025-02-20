@@ -103,7 +103,7 @@ impl Store for D1Store {
         trace_id: &HexEncodedId,
     ) -> Result<Vec<models::Span>> {
         SendFuture::new(async {
-            self.fetch_all(self.sql_builder.span_list_by_trace(), &[trace_id.into()])
+            self.fetch_all(self.sql_builder.span_list_by_trace(None), &[trace_id.into()])
                 .await
         })
         .await
@@ -146,11 +146,11 @@ impl Store for D1Store {
     async fn traces_list(
         &self,
         _tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
     ) -> Result<Vec<models::Trace>> {
         SendFuture::new(async {
             let traces = self
-                .fetch_all(self.sql_builder.traces_list(None), &[])
+                .fetch_all(self.sql_builder.traces_list(limit), &[])
                 .await?;
 
             Ok(traces)
