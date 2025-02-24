@@ -14,9 +14,11 @@ use bytes::Bytes;
 use http::{HeaderMap, Method, StatusCode};
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::future::Future;
 use thiserror::Error;
+use time::format_description::well_known::Rfc3339;
 use tracing::error;
 use tracing::trace;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -77,13 +79,18 @@ impl ApiClient {
         &self,
         method: Method,
         path: impl AsRef<str>,
+        query: Option<BTreeMap<&'static str, String>>,
         response_parser: impl FnOnce(reqwest::Response) -> P,
     ) -> Result<T, ApiClientError<E>>
     where
         E: Error,
         P: Future<Output = Result<T, ApiClientError<E>>>,
     {
-        let u = self.base_url.join(path.as_ref())?;
+        let mut u = self.base_url.join(path.as_ref())?;
+
+        if let Some(query) = query {
+            u.query_pairs_mut().extend_pairs(query);
+        }
 
         let mut req = self.client.request(method, u);
 
@@ -143,7 +150,7 @@ impl ApiClient {
     ) -> Result<models::Span, ApiClientError<SpanGetError>> {
         let path = format!("v1/traces/{}/spans/{}", trace_id.as_ref(), span_id.as_ref());
 
-        self.do_req(Method::GET, path, api_result).await
+        self.do_req(Method::GET, path, None, api_result).await
     }
 
     /// Retrieve all the spans associated with a single trace.
@@ -153,7 +160,7 @@ impl ApiClient {
     ) -> Result<Vec<models::Span>, ApiClientError<SpanGetError>> {
         let path = format!("v1/traces/{}/spans", trace_id.as_ref());
 
-        self.do_req(Method::GET, path, api_result).await
+        self.do_req(Method::GET, path, None, api_result).await
     }
 
     /// Retrieve a summary of a single trace.
@@ -163,16 +170,31 @@ impl ApiClient {
     ) -> Result<models::TraceSummary, ApiClientError<TraceGetError>> {
         let path = format!("v1/traces/{}", trace_id.as_ref());
 
-        self.do_req(Method::GET, path, api_result).await
+        self.do_req(Method::GET, path, None, api_result).await
     }
 
     /// List a summary traces
     pub async fn trace_list(
         &self,
+        limit: Option<u32>,
+        time: Option<time::OffsetDateTime>,
     ) -> Result<Vec<models::TraceSummary>, ApiClientError<TraceGetError>> {
         let path = "v1/traces";
 
-        self.do_req(Method::GET, path, api_result).await
+        let mut map = BTreeMap::new();
+
+        if let Some(limit) = limit {
+            map.insert("limit", limit.to_string());
+        }
+
+        if let Some(time) = time {
+            let formatted = time
+                .format(&Rfc3339)
+                .expect("failed to serialize OffsetDateTime into rfc3339");
+            map.insert("time", formatted);
+        }
+
+        self.do_req(Method::GET, path, Some(map), api_result).await
     }
 
     /// List a summary traces
@@ -182,7 +204,7 @@ impl ApiClient {
     ) -> Result<(), ApiClientError<TraceGetError>> {
         let path = format!("v1/traces/{}", trace_id.as_ref());
 
-        self.do_req(Method::DELETE, path, no_body).await
+        self.do_req(Method::DELETE, path, None, no_body).await
     }
 
     pub async fn span_delete(
@@ -192,7 +214,7 @@ impl ApiClient {
     ) -> Result<(), ApiClientError<TraceGetError>> {
         let path = format!("v1/traces/{}/spans/{}", trace_id.as_ref(), span_id.as_ref());
 
-        self.do_req(Method::DELETE, path, no_body).await
+        self.do_req(Method::DELETE, path, None, no_body).await
     }
 }
 

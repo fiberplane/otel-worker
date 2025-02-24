@@ -1,3 +1,5 @@
+use crate::data::util::Timestamp;
+
 /// SqlBuilder allows a store to build SQL queries.
 ///
 /// Any query functions that are required on the [`super::Store`] trait should
@@ -73,13 +75,24 @@ impl SqlBuilder {
     /// Get a list of all the traces. (currently limited to 20, sorted by most
     /// recent [`end_time`]). Leave limit as None to use the default of 20.
     ///
+    /// If `time` is `Some`, returns only traces that happened before the
+    /// `time` as specified by the trace's `end_time`.
+    ///
     /// Query parameters: None
-    pub fn traces_list(&self, limit: Option<u32>) -> String {
+    pub fn traces_list(&self, limit: Option<u32>, time: Option<Timestamp>) -> String {
         let limit = limit.unwrap_or(20);
+
+        let where_clause = if let Some(time) = time {
+            format!("WHERE end_time <= {}", time.fractional())
+        } else {
+            String::new()
+        };
+
         format!(
             "
             SELECT trace_id, MAX(end_time) as end_time
             FROM spans
+            {where_clause}
             GROUP BY trace_id
             ORDER BY end_time DESC
             LIMIT {limit}

@@ -7,6 +7,7 @@ pub mod client;
 pub mod debug;
 pub mod dev;
 pub mod system;
+mod util;
 
 /// otel-worker - store and query traces
 #[derive(Parser, Debug)]

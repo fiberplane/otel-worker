@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use libsql::{params, Builder, Connection};
 use otel_worker_core::data::models::{HexEncodedId, Span};
 use otel_worker_core::data::sql::SqlBuilder;
+use otel_worker_core::data::util::Timestamp;
 use otel_worker_core::data::{DbError, Result, Store, Transaction};
 use std::fmt::Display;
 use std::path::Path;
@@ -178,11 +179,12 @@ impl Store for LibsqlStore {
     async fn traces_list(
         &self,
         _tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
+        time: Option<Timestamp>,
     ) -> Result<Vec<otel_worker_core::data::models::Trace>> {
         let traces = self
             .connection
-            .query(&self.sql_builder.traces_list(None), ())
+            .query(&self.sql_builder.traces_list(limit, time), ())
             .await?
             .fetch_all()
             .await?;

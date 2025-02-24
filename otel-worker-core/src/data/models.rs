@@ -70,6 +70,14 @@ impl From<api::models::Span> for Span {
     }
 }
 
+#[derive(Deserialize)]
+pub struct TracesListQueryParams {
+    pub limit: Option<u32>,
+
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub time: Option<time::OffsetDateTime>,
+}
+
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct HexEncodedId(String);
 

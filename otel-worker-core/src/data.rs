@@ -1,4 +1,5 @@
 use crate::data::models::HexEncodedId;
+use crate::data::util::Timestamp;
 use crate::events::ServerEvents;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -68,7 +69,8 @@ pub trait Store: Send + Sync {
     async fn traces_list(
         &self,
         tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
+        time: Option<Timestamp>,
     ) -> Result<Vec<models::Trace>>;
 
     /// Delete all spans with a specific trace_id.

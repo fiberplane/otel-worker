@@ -1,6 +1,7 @@
 use axum::async_trait;
 use otel_worker_core::data::models::HexEncodedId;
 use otel_worker_core::data::sql::SqlBuilder;
+use otel_worker_core::data::util::Timestamp;
 use otel_worker_core::data::{models, DbError, Result, Store, Transaction};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -146,11 +147,12 @@ impl Store for D1Store {
     async fn traces_list(
         &self,
         _tx: &Transaction,
-        // Future improvement could hold sort fields, limits, etc
+        limit: Option<u32>, // Future improvement could hold sort fields, limits, etc
+        time: Option<Timestamp>,
     ) -> Result<Vec<models::Trace>> {
         SendFuture::new(async {
             let traces = self
-                .fetch_all(self.sql_builder.traces_list(None), &[])
+                .fetch_all(self.sql_builder.traces_list(limit, time), &[])
                 .await?;
 
             Ok(traces)
