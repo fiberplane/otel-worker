@@ -190,7 +190,7 @@ impl ApiClient {
         if let Some(time) = time {
             let formatted = time
                 .format(&Rfc3339)
-                .map_err(|_| ApiClientError::SerializationFailed("time".to_string()))?;
+                .expect("failed to serialize OffsetDateTime into rfc3339");
             map.insert("time", formatted);
         }
 
@@ -228,10 +228,6 @@ pub enum ApiClientError<E> {
     /// An error occurred in reqwest.
     #[error("An error occurred while making the request: {0}")]
     ClientError(#[from] reqwest::Error),
-
-    /// The client failed to serialize the requested query parameters or body
-    #[error("client failed to serialize {0}")]
-    SerializationFailed(String),
 
     /// An error returned from the service. These errors are specific to the
     /// endpoint that was called.
