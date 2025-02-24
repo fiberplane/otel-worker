@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use axum::response::sse::Event;
 use futures::StreamExt;
 use otel_worker_core::api::client::{self, ApiClient};
@@ -10,7 +10,7 @@ use rust_mcp_schema::{
     ServerCapabilitiesResources, TextResourceContents,
 };
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use url::Url;
 
 mod http_sse;
@@ -31,6 +31,10 @@ pub struct Args {
 }
 
 pub async fn handle_command(args: Args) -> Result<()> {
+    // Generate the websocket url outside of the [`tokio::task`] so we don't
+    // have to worry about error handling inside the [`tokio::task`].
+    let websocket_url = get_ws_url(&args.otel_worker_url)?;
+
     let client = client::builder(args.otel_worker_url)
         .set_bearer_token(args.otel_worker_token)
         .build();
@@ -41,8 +45,9 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
     let ws_sender = notifications.clone();
     let ws_handle = tokio::spawn(async move {
-        let u = "ws://localhost:8787/api/ws";
-        let (mut stream, _resp) = tokio_tungstenite::connect_async(u)
+        info!(?websocket_url, "Connecting to websocket");
+
+        let (mut stream, _resp) = tokio_tungstenite::connect_async(websocket_url)
             .await
             .expect("should be able to connect");
 
@@ -86,6 +91,31 @@ pub async fn handle_command(args: Args) -> Result<()> {
     ws_handle.abort();
 
     Ok(())
+}
+
+/// Give the otel_work_url generate the websocket uri. This will convert the
+/// scheme to the equivalent websocket scheme. The same authority will be used,
+/// while the path will use a hardcoded value.
+fn get_ws_url(otel_worker_url: &url::Url) -> Result<http::Uri> {
+    let scheme = match otel_worker_url.scheme() {
+        "http" => "ws",
+        "https" => "wss",
+        scheme => anyhow::bail!("unsupported scheme: {}", scheme),
+    };
+
+    let authority = otel_worker_url.authority();
+
+    // NOTE: For now just assume that the api is hosted on the root and thus the
+    // ws endpoint is nested directly there. This might need some smarts in case
+    // reverse proxy are in between that rewrite the path.
+    let path = "/api/ws";
+
+    http::Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query(path)
+        .build()
+        .context("unable to build URI")
 }
 
 async fn handle_initialize(params: InitializeRequestParams) -> Result<InitializeResult> {
