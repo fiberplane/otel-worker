@@ -12,8 +12,8 @@ use http::StatusCode;
 use otel_worker_core::api::client::{self, ApiClient};
 use otel_worker_core::api::models::{ServerMessage, ServerMessageDetails};
 use rust_mcp_schema::{
-    Implementation, InitializeRequestParams, InitializeResult, JsonrpcMessage, JsonrpcNotification,
-    ListResourcesRequestParams, ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
+    Implementation, InitializeRequestParams, InitializeResult, ListResourcesRequestParams,
+    ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
     ReadResourceResultContentsItem, Resource, ResourceListChangedNotification, ServerCapabilities,
     ServerCapabilitiesResources, TextResourceContents,
 };
@@ -79,10 +79,6 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
                 match msg.details {
                     ServerMessageDetails::SpanAdded(_span_added) => {
-                        // let data = JsonrpcNotification::new(
-                        //     "notifications/resources/list_changed".to_string(),
-                        //     None,
-                        // );
                         let data = ResourceListChangedNotification::new(None);
                         ws_sender
                             .send(
@@ -352,30 +348,6 @@ async fn handle_resources_read(
         contents,
         meta: None,
     };
-
-    // let resources = client
-    //     .trace_list()
-    //     .await?
-    //     .iter()
-    //     .map(|trace| {
-    //         let name = format!("trace {}", trace.trace_id);
-    //         let uri = format!("trace://{}", trace.trace_id);
-    //         Resource {
-    //             name,
-    //             uri,
-    //             description: None,
-    //             annotations: None,
-    //             mime_type: None,
-    //             size: None,
-    //         }
-    //     })
-    //     .collect();
-
-    // let result = ListResourcesResult {
-    //     meta: None,
-    //     next_cursor: None,
-    //     resources,
-    // };
 
     Ok(result)
 }
