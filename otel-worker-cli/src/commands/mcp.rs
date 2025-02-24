@@ -9,6 +9,7 @@ use rust_mcp_schema::{
     ReadResourceResultContentsItem, Resource, ResourceListChangedNotification, ServerCapabilities,
     ServerCapabilitiesResources, TextResourceContents,
 };
+use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 use url::Url;
@@ -25,8 +26,17 @@ pub struct Args {
     #[arg(long, env)]
     pub otel_worker_token: Option<String>,
 
+    #[arg(long, env, default_value_t = Transport::Stdio, value_enum)]
+    pub transport: Transport,
+
     /// The address that the MCP server will listen on.
-    #[arg(short, long, env, default_value = "127.0.0.1:3001")]
+    #[arg(
+        short,
+        long,
+        env,
+        default_value = "127.0.0.1:3001",
+        help_heading = "http with sse"
+    )]
     pub listen_address: String,
 }
 
@@ -85,8 +95,10 @@ pub async fn handle_command(args: Args) -> Result<()> {
         }
     });
 
-    // for now just http+sse
-    http_sse::serve(&args.listen_address, notifications, client).await?;
+    match args.transport {
+        Transport::Stdio => todo!("implement me!"),
+        Transport::HttpSse => http_sse::serve(&args.listen_address, notifications, client).await?,
+    }
 
     ws_handle.abort();
 
@@ -242,3 +254,12 @@ async fn handle_resources_read(
 //         let parsed: JsonRpcRequest = serde_json::from_str(input).unwrap();
 //     }
 // }
+
+#[derive(Debug, Default, Clone, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Transport {
+    #[default]
+    Stdio,
+
+    HttpSse,
+}
