@@ -1,14 +1,6 @@
-use anyhow::{bail, Context, Result};
-use async_stream::try_stream;
-use axum::extract::{MatchedPath, Request, State};
-use axum::middleware::{self, Next};
+use anyhow::{bail, Result};
 use axum::response::sse::Event;
-use axum::response::{IntoResponse, Sse};
-use axum::routing::{get, post};
-use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
-use axum_jrpc::{JsonRpcExtractor, JsonRpcResponse, Value};
-use futures::{Stream, StreamExt};
-use http::StatusCode;
+use futures::StreamExt;
 use otel_worker_core::api::client::{self, ApiClient};
 use otel_worker_core::api::models::{ServerMessage, ServerMessageDetails};
 use rust_mcp_schema::{
@@ -17,13 +9,11 @@ use rust_mcp_schema::{
     ReadResourceResultContentsItem, Resource, ResourceListChangedNotification, ServerCapabilities,
     ServerCapabilitiesResources, TextResourceContents,
 };
-use std::convert::Infallible;
-use std::process::exit;
-use std::time::{Duration, Instant};
-use tokio::sync::broadcast::Sender;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, warn};
 use url::Url;
+
+mod http_sse;
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -41,24 +31,15 @@ pub struct Args {
 }
 
 pub async fn handle_command(args: Args) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(&args.listen_address)
-        .await
-        .with_context(|| format!("Failed to bind to address: {}", args.listen_address))?;
-
-    info!(
-        mcp_listen_address = ?listener.local_addr().context("Failed to get local address")?,
-        "Starting MCP server",
-    );
-
     let client = client::builder(args.otel_worker_url)
         .set_bearer_token(args.otel_worker_token)
         .build();
 
     // This broadcast pair is used for async communication back to the MCP
     // client through SSE.
-    let (sender, _) = tokio::sync::broadcast::channel(100);
+    let (notifications, _) = tokio::sync::broadcast::channel(100);
 
-    let ws_sender = sender.clone();
+    let ws_sender = notifications.clone();
     let ws_handle = tokio::spawn(async move {
         let u = "ws://localhost:8787/api/ws";
         let (mut stream, _resp) = tokio_tungstenite::connect_async(u)
@@ -99,145 +80,12 @@ pub async fn handle_command(args: Args) -> Result<()> {
         }
     });
 
-    let mcp_service = build_mcp_service(client, sender);
-
-    axum::serve(listener, mcp_service)
-        .with_graceful_shutdown(shutdown_requested())
-        .await?;
+    // for now just http+sse
+    http_sse::serve(&args.listen_address, notifications, client).await?;
 
     ws_handle.abort();
 
     Ok(())
-}
-
-fn build_mcp_service(client: ApiClient, sender: Sender<Event>) -> axum::Router {
-    let state = McpState { client, sender };
-    axum::Router::new()
-        .route("/messages", post(json_rpc_handler))
-        .route("/sse", get(sse_handler))
-        .layer(middleware::from_fn(log_and_metrics))
-        .with_state(state)
-}
-
-#[derive(Clone)]
-struct McpState {
-    client: ApiClient,
-    sender: Sender<Event>,
-}
-
-impl McpState {
-    fn reply(&self, response: JsonRpcResponse) {
-        let event = Event::default()
-            .event("message")
-            .json_data(response)
-            .expect("unable to serialize data");
-
-        if let Err(err) = self.sender.send(event) {
-            warn!(?err, "A reply was send, but client is connected");
-        }
-    }
-}
-
-#[tracing::instrument(skip(state))]
-async fn json_rpc_handler(
-    State(state): State<McpState>,
-    req: JsonRpcExtractor,
-) -> impl IntoResponse {
-    tokio::spawn(async move {
-        let answer_id = req.get_answer_id();
-        let result = match req.method() {
-            "initialize" => handle_initialize(req.parse_params().unwrap())
-                .await
-                .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                .unwrap_or_else(|err| {
-                    error!(?err, "initialization failed");
-                    JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            "message".to_string(),
-                            Value::Null,
-                        ),
-                    )
-                }),
-            "resources/list" => handle_resources_list(&state, req.parse_params().unwrap())
-                .await
-                .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                .unwrap_or_else(|err| {
-                    error!(?err, "handle_resources_list");
-                    JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            "message".to_string(),
-                            Value::Null,
-                        ),
-                    )
-                }),
-            "resources/read" => handle_resources_read(&state, req.parse_params().unwrap())
-                .await
-                .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                .unwrap_or_else(|err| {
-                    error!(?err, "handle_resources_read");
-                    JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            "message".to_string(),
-                            Value::Null,
-                        ),
-                    )
-                }),
-            method => {
-                error!(?method, "RPC used a unsupported method");
-                JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::MethodNotFound,
-                        "message".to_string(),
-                        Value::Null,
-                    ),
-                )
-            }
-        };
-
-        state.reply(result);
-    });
-
-    StatusCode::ACCEPTED
-}
-
-#[tracing::instrument(skip(state))]
-async fn sse_handler(
-    State(state): State<McpState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    debug!("MCP client connected to the SSE handler");
-
-    // We will subscribe to the global sender and convert those messages into
-    // a stream, which in turn gets converted into SSE events.
-    let mut receiver = state.sender.subscribe();
-    let stream = try_stream! {
-        loop {
-            let recv = receiver.recv().await.expect("should work");
-            yield recv;
-        }
-    };
-
-    // Part of the SSE protocol is sending the location where the client needs
-    // to do its POST request. This will be sent to the channel which will be
-    // queued there until the client is connected to the SSE stream.
-    if let Err(err) = state
-        .sender
-        .send(Event::default().event("endpoint").data("/messages"))
-    {
-        error!(?err, "unable to send initial message to MCP client");
-    }
-
-    Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(5))
-            .text("keep-alive-text"),
-    )
 }
 
 async fn handle_initialize(params: InitializeRequestParams) -> Result<InitializeResult> {
@@ -286,7 +134,7 @@ async fn handle_initialize(params: InitializeRequestParams) -> Result<Initialize
 }
 
 async fn handle_resources_list(
-    McpState { client, .. }: &McpState,
+    client: &ApiClient,
     _params: ListResourcesRequestParams,
 ) -> Result<ListResourcesResult> {
     let resources = client
@@ -317,7 +165,7 @@ async fn handle_resources_list(
 }
 
 async fn handle_resources_read(
-    McpState { client, .. }: &McpState,
+    client: &ApiClient,
     params: ReadResourceRequestParams,
 ) -> Result<ReadResourceResult> {
     debug!(?params, "Received a call on resources_read");
@@ -350,57 +198,6 @@ async fn handle_resources_read(
     };
 
     Ok(result)
-}
-
-/// Blocks while waiting for the SIGINT signal. This is most commonly send using
-/// the keyboard shortcut ctrl+c. This is intended to be used with axum's
-/// [`with_graceful_shutdown`] to trigger a graceful shutdown.
-///
-/// Another SIGINT listener task is spawned just before resolving this task,
-/// which will forcefully exit the application. This is to prevent not being
-/// able to shutdown, if the graceful shutdown doesn't work.
-async fn shutdown_requested() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to listen for ctrl-c");
-
-    info!("Received SIGINT, shutting down api server");
-
-    // Monitor for another SIGINT, and force shutdown if received.
-    tokio::spawn(async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Failed to listen for ctrl-c");
-
-        warn!("Received another SIGINT, forcing shutdown");
-        exit(1);
-    });
-}
-
-async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
-    let start_time = Instant::now();
-
-    let method = req.method().to_string();
-    let matched_path = req
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|p| p.as_str().to_string());
-
-    let span = info_span!("http_request",
-        %method,
-        path = %req.uri().path(),
-        matched_path = %matched_path.as_deref().unwrap_or_default(),
-        version = ?req.version());
-
-    let res = next.run(req).instrument(span.clone()).await;
-
-    let duration = start_time.elapsed();
-    let status = res.status().as_u16().to_string();
-    span.in_scope(|| {
-        debug!(%status, duration = %format!("{duration:.1?}"), "Request result");
-    });
-
-    res
 }
 
 // #[cfg(test)]
