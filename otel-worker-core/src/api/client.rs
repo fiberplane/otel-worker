@@ -17,6 +17,8 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::future::Future;
+use std::ops::Deref;
+use std::sync::Arc;
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use tracing::error;
@@ -24,48 +26,99 @@ use tracing::trace;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 
+pub fn builder(base_url: Url) -> ApiClientBuilder {
+    ApiClientBuilder::new(base_url)
+}
+
+pub struct ApiClientBuilder {
+    base_url: Url,
+    bearer_token: Option<String>,
+    client: Option<reqwest::Client>,
+}
+
+impl ApiClientBuilder {
+    pub fn new(base_url: Url) -> Self {
+        ApiClientBuilder {
+            base_url,
+            bearer_token: None,
+            client: None,
+        }
+    }
+
+    pub fn bearer_token(self, bearer_token: impl Into<String>) -> Self {
+        self.set_bearer_token(Some(bearer_token.into()))
+    }
+
+    pub fn set_bearer_token(mut self, bearer_token: Option<String>) -> Self {
+        self.bearer_token = bearer_token;
+        self
+    }
+
+    pub fn client(self, client: impl Into<reqwest::Client>) -> Self {
+        self.set_client(Some(client.into()))
+    }
+
+    pub fn set_client(mut self, client: Option<reqwest::Client>) -> Self {
+        self.client = client;
+        self
+    }
+
+    pub fn build_inner(self) -> ApiClientInner {
+        let client = self.client.unwrap_or_else(|| {
+            let version = env!("CARGO_PKG_VERSION");
+            reqwest::Client::builder()
+                .user_agent(format!("otel-worker/{version}"))
+                .build()
+                .expect("should be able to create reqwest client")
+        });
+
+        ApiClientInner::new(client, self.base_url, self.bearer_token)
+    }
+
+    pub fn build(self) -> ApiClient {
+        let inner = self.build_inner();
+        ApiClient::new(inner)
+    }
+}
+
+#[derive(Clone)]
 pub struct ApiClient {
+    inner: Arc<ApiClientInner>,
+}
+
+impl ApiClient {
+    pub fn new(inner: ApiClientInner) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+}
+
+impl Deref for ApiClient {
+    type Target = ApiClientInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+pub struct ApiClientInner {
     client: reqwest::Client,
     base_url: Url,
     bearer_token: Option<String>,
 }
 
-impl ApiClient {
+impl ApiClientInner {
     /// Create a new ApiClient with a default [`reqwest::Client`].
     ///
     /// [`base_url`] should be the host of the otel-worker API, with optionally
     /// a port and a path (in case you are doing path based routing).
-    pub fn new(base_url: Url) -> Self {
-        let version = env!("CARGO_PKG_VERSION");
-        let client = reqwest::Client::builder()
-            .user_agent(format!("otel-worker/{version}"))
-            .build()
-            .expect("should be able to create reqwest client");
-
-        Self::with_client(client, base_url)
-    }
-
-    /// Create a new ApiClient with a custom [`reqwest::Client`].
-    pub fn with_client(client: reqwest::Client, base_url: Url) -> Self {
-        Self {
+    pub fn new(client: reqwest::Client, base_url: Url, bearer_token: Option<String>) -> Self {
+        ApiClientInner {
             client,
             base_url,
-            bearer_token: None,
+            bearer_token,
         }
-    }
-
-    /// Set a bearer token that will be send with every request.
-    ///
-    /// NOTE: We might want to move this to a builder pattern to have a nicer DX.
-    pub fn bearer_token(&mut self, bearer_token: impl Into<String>) {
-        self.bearer_token = Some(bearer_token.into());
-    }
-
-    /// Set a bearer token that will be send with every request.
-    ///
-    /// NOTE: We might want to move this to a builder pattern to have a nicer DX.
-    pub fn set_bearer_token(&mut self, bearer_token: Option<String>) {
-        self.bearer_token = bearer_token;
     }
 
     /// Perform a request using otel-worker API's convention.

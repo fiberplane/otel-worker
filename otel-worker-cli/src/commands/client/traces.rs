@@ -1,7 +1,7 @@
 use crate::commands::util::parse_rfc3339_from_str;
 use anyhow::Result;
 use clap::Subcommand;
-use otel_worker_core::api::client::ApiClient;
+use otel_worker_core::api::client;
 use std::io::stdout;
 use time::OffsetDateTime;
 use url::Url;
@@ -45,8 +45,9 @@ pub struct GetArgs {
 }
 
 async fn handle_get(args: GetArgs) -> Result<()> {
-    let mut api_client = ApiClient::new(args.base_url.clone());
-    api_client.set_bearer_token(args.auth_token);
+    let api_client = client::builder(args.base_url.clone())
+        .set_bearer_token(args.auth_token)
+        .build();
 
     let result = api_client.trace_get(args.trace_id).await?;
 
@@ -73,8 +74,9 @@ pub struct ListArgs {
 }
 
 async fn handle_list(args: ListArgs) -> Result<()> {
-    let mut api_client = ApiClient::new(args.base_url.clone());
-    api_client.set_bearer_token(args.auth_token);
+    let api_client = client::builder(args.base_url.clone())
+        .set_bearer_token(args.auth_token)
+        .build();
 
     let result = api_client.trace_list(args.limit, args.time).await?;
 
@@ -96,8 +98,9 @@ pub struct DeleteArgs {
 }
 
 async fn handle_delete(args: DeleteArgs) -> Result<()> {
-    let mut api_client = ApiClient::new(args.base_url.clone());
-    api_client.set_bearer_token(args.auth_token);
+    let api_client = client::builder(args.base_url.clone())
+        .set_bearer_token(args.auth_token)
+        .build();
 
     api_client.trace_delete(args.trace_id).await?;
 

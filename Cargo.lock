@@ -1582,11 +1582,13 @@ name = "otel-worker-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "axum",
  "axum-jrpc",
  "bytes",
  "clap",
+ "futures",
  "futures-util",
  "hex",
  "http",
@@ -1612,6 +1614,7 @@ dependencies = [
  "thiserror 2.0.11",
  "time",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "toml",
  "tonic",

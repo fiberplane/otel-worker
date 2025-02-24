@@ -122,7 +122,7 @@ pub struct SpanAdded {
     /// New spans that have been added. The key is the trace ID and the values
     /// are the spans ID's for that specific trace. Both trace and span ID are
     /// hex encoded.
-    new_spans: Vec<(String, String)>,
+    pub new_spans: Vec<(String, String)>,
 }
 
 impl SpanAdded {
