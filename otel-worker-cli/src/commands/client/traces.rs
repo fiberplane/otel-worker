@@ -1,7 +1,9 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Subcommand;
 use otel_worker_core::api::client::ApiClient;
 use std::io::stdout;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 use url::Url;
 
 #[derive(clap::Args, Debug)]
@@ -55,6 +57,13 @@ async fn handle_get(args: GetArgs) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
+    /// Optional limit to the amount of traces to be returned
+    pub limit: Option<u32>,
+
+    /// Optional timestamp from which traces that occurred before it are returned.
+    /// Must be in RFC3339 format
+    pub time: Option<String>,
+
     #[arg(from_global)]
     pub base_url: Url,
 
@@ -63,10 +72,19 @@ pub struct ListArgs {
 }
 
 async fn handle_list(args: ListArgs) -> Result<()> {
+    let time = if let Some(time) = args.time {
+        Some(
+            OffsetDateTime::parse(&time, &Rfc3339)
+                .map_err(|err| anyhow!("failed to parse time argument as rfc3339: {err}"))?,
+        )
+    } else {
+        None
+    };
+
     let mut api_client = ApiClient::new(args.base_url.clone());
     api_client.set_bearer_token(args.auth_token);
 
-    let result = api_client.trace_list().await?;
+    let result = api_client.trace_list(args.limit, time).await?;
 
     serde_json::to_writer_pretty(stdout(), &result)?;
 
