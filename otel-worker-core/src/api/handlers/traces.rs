@@ -13,11 +13,11 @@ use tracing::error;
 #[tracing::instrument(skip_all)]
 pub async fn traces_list_handler(
     State(store): State<BoxedStore>,
-    Query(TracesListQueryParams { limit, time }): Query<TracesListQueryParams>,
+    Query(params): Query<TracesListQueryParams>,
 ) -> Result<Json<Vec<TraceSummary>>, ApiServerError<TraceListError>> {
     let tx = store.start_readonly_transaction().await?;
 
-    let traces = store.traces_list(&tx, limit, time.map(Into::into)).await?;
+    let traces = store.traces_list(&tx, params.limit, params.time.map(Into::into)).await?;
 
     let mut result = Vec::with_capacity(20);
 
