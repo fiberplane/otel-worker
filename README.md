@@ -1,8 +1,8 @@
-This repository contains a collection of Rust related projects.
+This repository contains a collection of Rust related projects for OpenTelemtry and Cloudflare Workers.
 
 ## otel-worker
 
-An OTEL ingestor that is intended to be run on Clouflare workers and uses D1 to
+An OpenTelemtry (OTEL) collector that is intended to be run on Clouflare Workers and uses D1 to
 store the traces. It also has a few endpoints to expose these traces.
 
 The repository is organized as follows:
@@ -27,7 +27,7 @@ The repository is organized as follows:
 │   └── 📂 src/                    # Custom build scripts and workflows
 ```
 
-The [otel-worker/README.md](otel-worker/) folder contains the main ingestor implementation discussed below.
+The [otel-worker/README.md](otel-worker/) folder contains the main collector implementation discussed below.
 
 # otel-worker
 

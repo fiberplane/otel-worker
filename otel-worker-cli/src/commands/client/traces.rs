@@ -1,7 +1,9 @@
+use crate::commands::util::parse_rfc3339_from_str;
 use anyhow::Result;
 use clap::Subcommand;
 use otel_worker_core::api::client::ApiClient;
 use std::io::stdout;
+use time::OffsetDateTime;
 use url::Url;
 
 #[derive(clap::Args, Debug)]
@@ -55,6 +57,14 @@ async fn handle_get(args: GetArgs) -> Result<()> {
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
+    /// Optional limit to the amount of traces to be returned
+    pub limit: Option<u32>,
+
+    /// Optional timestamp from which traces that occurred before it are returned.
+    /// Must be in RFC3339 format
+    #[arg(value_parser = parse_rfc3339_from_str)]
+    pub time: Option<OffsetDateTime>,
+
     #[arg(from_global)]
     pub base_url: Url,
 
@@ -66,7 +76,7 @@ async fn handle_list(args: ListArgs) -> Result<()> {
     let mut api_client = ApiClient::new(args.base_url.clone());
     api_client.set_bearer_token(args.auth_token);
 
-    let result = api_client.trace_list().await?;
+    let result = api_client.trace_list(args.limit, args.time).await?;
 
     serde_json::to_writer_pretty(stdout(), &result)?;
 
