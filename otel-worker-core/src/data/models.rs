@@ -70,7 +70,8 @@ impl From<api::models::Span> for Span {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
+#[serde(default)]
 pub struct TracesListQueryParams {
     pub limit: Option<u32>,
 
