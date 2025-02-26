@@ -3,7 +3,7 @@ main = "build/worker/shim.mjs"
 compatibility_date = "2024-07-30"
 
 [dev]
-port = 8877
+port = 24318
 
 [[durable_objects.bindings]]
 name = "WEBSOCKET_HIBERNATION_SERVER"
