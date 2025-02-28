@@ -75,7 +75,6 @@ futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 axum-jrpc = "0.7"
 rust-mcp-schema = { version = "0.1.0", features = ["2024_11_05"] }
-async-stream = "0.3"
 
 [dev-dependencies]
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
