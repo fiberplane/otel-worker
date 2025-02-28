@@ -20,7 +20,6 @@ axum = { workspace = true, default-features = false, features = [
     "tracing",
     "ws",
 ] }
-axum-jrpc = "0.7"
 bytes = { version = "1.6" }
 clap = { workspace = true, features = ["derive", "env"] }
 futures = "0.3"
