@@ -22,8 +22,6 @@ pub(crate) async fn serve(state: McpState) -> Result<()> {
                 break;
             }
 
-            error!(line, "this is the line");
-
             let client_message: ClientMessage =
                 serde_json::from_str(&line).expect("todo: handle error state");
 
