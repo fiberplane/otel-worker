@@ -16,7 +16,7 @@ Here's an example of how to send traces to the worker using `curl` from within
 the `examples/send-trace` directory:
 
 ```sh
-curl -X POST http://localhost:8787/v1/traces \
+curl -X POST http://localhost:24318/v1/traces \
   -H "Authorization: Bearer your-secret-token-here" \
   -H "Content-Type: application/json" \
   --data-binary @trace.json
