@@ -1,23 +1,20 @@
 use super::McpState;
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, post};
-use axum_jrpc::JsonRpcExtractor;
+use axum::Json;
 use futures::{Stream, StreamExt};
 use http::StatusCode;
-use rust_mcp_schema::schema_utils::{
-    ResultFromServer, RpcErrorCodes, ServerJsonrpcResponse, ServerMessage,
-};
-use rust_mcp_schema::{JsonrpcError, RequestId};
+use rust_mcp_schema::schema_utils::ClientMessage;
 use std::process::exit;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
-use tracing::{debug, error, info, info_span, warn, Instrument};
+use tracing::{debug, info, info_span, warn, Instrument};
 
 pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
     let listener = TcpListener::bind(listen_address)
@@ -49,43 +46,10 @@ fn build_mcp_service(state: McpState) -> axum::Router {
 #[tracing::instrument(skip(state))]
 async fn json_rpc_handler(
     State(state): State<McpState>,
-    req: JsonRpcExtractor,
+    Json(client_message): Json<ClientMessage>,
 ) -> impl IntoResponse {
     tokio::spawn(async move {
-        let answer_id = req.get_answer_id();
-        let result: Result<ResultFromServer> = match req.method() {
-            "initialize" => super::handle_initialize(&state, req.parse_params().unwrap())
-                .await
-                .map(Into::into),
-            "resources/list" => super::handle_resources_list(&state, req.parse_params().unwrap())
-                .await
-                .map(Into::into),
-            "resources/read" => super::handle_resources_read(&state, req.parse_params().unwrap())
-                .await
-                .map(Into::into),
-            method => {
-                error!(?method, "RPC used a unsupported method");
-                Err(Error::msg("unknown method"))
-            }
-        };
-
-        let id = match answer_id {
-            axum_jrpc::Id::Num(val) => RequestId::Integer(val),
-            axum_jrpc::Id::Str(val) => RequestId::String(val),
-            axum_jrpc::Id::None(_) => panic!("id should be set"),
-        };
-
-        let response: ServerMessage = match result {
-            Ok(result) => ServerMessage::Response(ServerJsonrpcResponse::new(id, result)),
-            Err(_) => ServerMessage::Error(JsonrpcError::create(
-                id,
-                RpcErrorCodes::INTERNAL_ERROR,
-                "error_message".to_string(),
-                None,
-            )),
-        };
-
-        state.reply(response);
+        super::handle_client_message(&state, client_message).await;
     });
 
     StatusCode::ACCEPTED

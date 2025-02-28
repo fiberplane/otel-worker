@@ -1,14 +1,9 @@
+use super::McpState;
 use anyhow::Result;
-use rust_mcp_schema::schema_utils::{
-    ClientJsonrpcRequest, ClientMessage, RequestFromClient, ResultFromServer, RpcErrorCodes,
-    ServerJsonrpcResponse, ServerMessage,
-};
-use rust_mcp_schema::{ClientRequest, JsonrpcError};
+use rust_mcp_schema::schema_utils::ClientMessage;
 use std::io::Write;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{debug, error, info};
-
-use super::McpState;
 
 pub(crate) async fn serve(state: McpState) -> Result<()> {
     let mut notifications_rx = state.notifications.subscribe();
@@ -32,20 +27,7 @@ pub(crate) async fn serve(state: McpState) -> Result<()> {
             let client_message: ClientMessage =
                 serde_json::from_str(&line).expect("todo: handle error state");
 
-            match client_message {
-                ClientMessage::Request(request) => {
-                    handle_client_request(&state, request).await;
-                }
-                ClientMessage::Notification(notification) => {
-                    handle_client_notification(notification).await;
-                }
-                ClientMessage::Response(response) => {
-                    handle_client_response(response).await;
-                }
-                ClientMessage::Error(error) => {
-                    handle_client_error(error).await;
-                }
-            }
+            super::handle_client_message(&state, client_message).await;
         }
     });
 
@@ -81,60 +63,4 @@ pub(crate) async fn serve(state: McpState) -> Result<()> {
     }
 
     Ok(())
-}
-
-async fn handle_client_request(state: &McpState, request: ClientJsonrpcRequest) {
-    let result: Result<ResultFromServer> = match request.request {
-        RequestFromClient::ClientRequest(client_request) => match client_request {
-            ClientRequest::InitializeRequest(inner_request) => {
-                super::handle_initialize(&state, inner_request.params)
-                    .await
-                    .map(Into::into)
-            }
-            ClientRequest::ListResourcesRequest(inner_request) => {
-                super::handle_resources_list(&state, inner_request.params)
-                    .await
-                    .map(Into::into)
-            }
-            ClientRequest::ReadResourceRequest(inner_request) => {
-                super::handle_resources_read(&state, inner_request.params)
-                    .await
-                    .map(Into::into)
-            }
-            _inner_request => {
-                error!(method = request.method, "Received unsupported requests");
-                return;
-            }
-        },
-        RequestFromClient::CustomRequest(_value) => {
-            error!("received unsupported custom message");
-            return;
-        }
-    };
-
-    let response = match result {
-        Ok(result) => ServerMessage::Response(ServerJsonrpcResponse::new(request.id, result)),
-        Err(_err) => ServerMessage::Error(JsonrpcError::create(
-            request.id,
-            RpcErrorCodes::INTERNAL_ERROR,
-            "error_message".to_string(),
-            None,
-        )),
-    };
-
-    state.reply(response);
-}
-
-async fn handle_client_notification(
-    notification: rust_mcp_schema::schema_utils::ClientJsonrpcNotification,
-) {
-    info!(?notification, "Received a notification!");
-}
-
-async fn handle_client_response(response: rust_mcp_schema::schema_utils::ClientJsonrpcResponse) {
-    info!(?response, "Received a response!");
-}
-
-async fn handle_client_error(error: JsonrpcError) {
-    info!(?error, "Received a client error!");
 }

@@ -2,17 +2,20 @@ use anyhow::{bail, Context, Result};
 use futures::StreamExt;
 use otel_worker_core::api::client::{self, ApiClient};
 use otel_worker_core::api::models;
-use rust_mcp_schema::schema_utils::ServerMessage;
+use rust_mcp_schema::schema_utils::{
+    ClientJsonrpcRequest, ClientMessage, RequestFromClient, ResultFromServer, RpcErrorCodes,
+    ServerJsonrpcResponse, ServerMessage,
+};
 use rust_mcp_schema::{
-    Implementation, InitializeRequestParams, InitializeResult, ListResourcesRequestParams,
-    ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
+    ClientRequest, Implementation, InitializeRequestParams, InitializeResult, JsonrpcError,
+    ListResourcesRequestParams, ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
     ReadResourceResultContentsItem, Resource, ResourceListChangedNotification, ServerCapabilities,
     ServerCapabilitiesResources, TextResourceContents,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 mod http_sse;
@@ -77,17 +80,12 @@ pub async fn handle_command(args: Args) -> Result<()> {
                 let msg: models::ServerMessage =
                     serde_json::from_str(&content).expect("Should be able to deserialize it");
 
-                match msg.details {
-                    models::ServerMessageDetails::SpanAdded(_span_added) => {
-                        let data = ResourceListChangedNotification::new(None);
-                        let message = ServerMessage::Notification(data.into());
-                        ws_sender.send(message).ok();
-                    }
-                    _ => (),
+                // We are only interested in 1 event, so we just ignore everything else
+                if let models::ServerMessageDetails::SpanAdded(_span_added) = msg.details {
+                    let data = ResourceListChangedNotification::new(None);
+                    let message = ServerMessage::Notification(data.into());
+                    ws_sender.send(message).ok();
                 }
-            } else {
-                debug!("Received non text message, ignoring");
-                continue;
             }
         }
     });
@@ -118,9 +116,10 @@ impl McpState {
         }
     }
 
+    /// Send a message to the MCP client using [`notifications`].
     fn reply(&self, message: ServerMessage) {
-        if let Err(err) = self.notifications.send(message) {
-            warn!(?err, "A reply was send, but client is connected");
+        if self.notifications.send(message).is_err() {
+            warn!("A reply was send, but no client is connected");
         }
     }
 }
@@ -139,7 +138,7 @@ fn get_ws_url(otel_worker_url: &url::Url) -> Result<http::Uri> {
 
     // NOTE: For now just assume that the api is hosted on the root and thus the
     // ws endpoint is nested directly there. This might need some smarts in case
-    // reverse proxy are in between that rewrite the path.
+    // reverse proxy is used to expose the otel-worker.
     let path = "/api/ws";
 
     http::Uri::builder()
@@ -286,4 +285,77 @@ pub enum Transport {
     Stdio,
 
     HttpSse,
+}
+
+async fn handle_client_message(state: &McpState, client_message: ClientMessage) {
+    match client_message {
+        ClientMessage::Request(request) => {
+            handle_client_request(state, request).await;
+        }
+        ClientMessage::Notification(notification) => {
+            handle_client_notification(notification).await;
+        }
+        ClientMessage::Response(response) => {
+            handle_client_response(response).await;
+        }
+        ClientMessage::Error(error) => {
+            handle_client_error(error).await;
+        }
+    }
+}
+
+async fn handle_client_request(state: &McpState, request: ClientJsonrpcRequest) {
+    let result: Result<ResultFromServer> = match request.request {
+        RequestFromClient::ClientRequest(client_request) => match client_request {
+            ClientRequest::InitializeRequest(inner_request) => {
+                handle_initialize(state, inner_request.params)
+                    .await
+                    .map(Into::into)
+            }
+            ClientRequest::ListResourcesRequest(inner_request) => {
+                handle_resources_list(state, inner_request.params)
+                    .await
+                    .map(Into::into)
+            }
+            ClientRequest::ReadResourceRequest(inner_request) => {
+                handle_resources_read(state, inner_request.params)
+                    .await
+                    .map(Into::into)
+            }
+            _inner_request => {
+                error!(method = request.method, "Received unsupported requests");
+                return;
+            }
+        },
+        RequestFromClient::CustomRequest(_value) => {
+            error!("received unsupported custom message");
+            return;
+        }
+    };
+
+    let response = match result {
+        Ok(result) => ServerMessage::Response(ServerJsonrpcResponse::new(request.id, result)),
+        Err(_err) => ServerMessage::Error(JsonrpcError::create(
+            request.id,
+            RpcErrorCodes::INTERNAL_ERROR,
+            "error_message".to_string(),
+            None,
+        )),
+    };
+
+    state.reply(response);
+}
+
+async fn handle_client_notification(
+    notification: rust_mcp_schema::schema_utils::ClientJsonrpcNotification,
+) {
+    info!(?notification, "Received a notification!");
+}
+
+async fn handle_client_response(response: rust_mcp_schema::schema_utils::ClientJsonrpcResponse) {
+    info!(?response, "Received a response!");
+}
+
+async fn handle_client_error(error: JsonrpcError) {
+    info!(?error, "Received a client error!");
 }
