@@ -53,7 +53,7 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
     // This broadcast pair is used for async communication back to the MCP
     // client through SSE.
-    let (notifications_tx, notifications_rx) = broadcast::channel(100);
+    let (notifications_tx, _) = broadcast::channel(100);
 
     let ws_sender = notifications_tx.clone();
     let ws_handle = tokio::spawn(async move {
@@ -89,7 +89,7 @@ pub async fn handle_command(args: Args) -> Result<()> {
     });
 
     match args.transport {
-        Transport::Stdio => stdio::serve(notifications_tx, notifications_rx, api_client).await?,
+        Transport::Stdio => stdio::serve(notifications_tx, api_client).await?,
         Transport::HttpSse => {
             http_sse::serve(&args.listen_address, notifications_tx, api_client).await?
         }

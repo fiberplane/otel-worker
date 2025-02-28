@@ -7,14 +7,15 @@ use rust_mcp_schema::schema_utils::{
 use rust_mcp_schema::{ClientRequest, JsonrpcError};
 use std::io::Write;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::broadcast::Sender;
 use tracing::{debug, error, info};
 
 pub(crate) async fn serve(
     notifications_tx: Sender<ServerMessage>,
-    mut notifications_rx: Receiver<ServerMessage>,
     api_client: ApiClient,
 ) -> Result<()> {
+    let mut notifications_rx = notifications_tx.subscribe();
+
     // spawn two tasks, one to read lines on stdin, parse payloads, and dispatch
     // to super::*. The other has to read from notifications and serialize them
     // to stdout.
