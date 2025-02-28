@@ -1,4 +1,4 @@
-use super::{handle_initialize, handle_resources_list, handle_resources_read};
+use super::McpState;
 use anyhow::{Context, Error, Result};
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::{self, Next};
@@ -8,7 +8,6 @@ use axum::routing::{get, post};
 use axum_jrpc::JsonRpcExtractor;
 use futures::{Stream, StreamExt};
 use http::StatusCode;
-use otel_worker_core::api::client::ApiClient;
 use rust_mcp_schema::schema_utils::{
     ResultFromServer, RpcErrorCodes, ServerJsonrpcResponse, ServerMessage,
 };
@@ -16,16 +15,11 @@ use rust_mcp_schema::{JsonrpcError, RequestId};
 use std::process::exit;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
-use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
-pub(crate) async fn serve(
-    listen_address: &str,
-    notifications: broadcast::Sender<ServerMessage>,
-    api_client: ApiClient,
-) -> Result<()> {
+pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
     let listener = TcpListener::bind(listen_address)
         .await
         .with_context(|| format!("Failed to bind to address: {}", listen_address))?;
@@ -35,7 +29,7 @@ pub(crate) async fn serve(
         "Starting MCP server",
     );
 
-    let mcp_service = build_mcp_service(notifications, api_client);
+    let mcp_service = build_mcp_service(state);
 
     axum::serve(listener, mcp_service)
         .with_graceful_shutdown(shutdown_requested())
@@ -44,30 +38,12 @@ pub(crate) async fn serve(
     Ok(())
 }
 
-fn build_mcp_service(notifications: Sender<ServerMessage>, api_client: ApiClient) -> axum::Router {
-    let state = McpState {
-        api_client,
-        notifications,
-    };
+fn build_mcp_service(state: McpState) -> axum::Router {
     axum::Router::new()
         .route("/messages", post(json_rpc_handler))
         .route("/sse", get(sse_handler))
         .layer(middleware::from_fn(log_and_metrics))
         .with_state(state)
-}
-
-#[derive(Clone)]
-struct McpState {
-    api_client: ApiClient,
-    notifications: Sender<ServerMessage>,
-}
-
-impl McpState {
-    fn reply(&self, message: ServerMessage) {
-        if let Err(err) = self.notifications.send(message) {
-            warn!(?err, "A reply was send, but client is connected");
-        }
-    }
 }
 
 #[tracing::instrument(skip(state))]
@@ -78,19 +54,15 @@ async fn json_rpc_handler(
     tokio::spawn(async move {
         let answer_id = req.get_answer_id();
         let result: Result<ResultFromServer> = match req.method() {
-            "initialize" => handle_initialize(req.parse_params().unwrap())
+            "initialize" => super::handle_initialize(&state, req.parse_params().unwrap())
                 .await
                 .map(Into::into),
-            "resources/list" => {
-                handle_resources_list(&state.api_client, req.parse_params().unwrap())
-                    .await
-                    .map(Into::into)
-            }
-            "resources/read" => {
-                handle_resources_read(&state.api_client, req.parse_params().unwrap())
-                    .await
-                    .map(Into::into)
-            }
+            "resources/list" => super::handle_resources_list(&state, req.parse_params().unwrap())
+                .await
+                .map(Into::into),
+            "resources/read" => super::handle_resources_read(&state, req.parse_params().unwrap())
+                .await
+                .map(Into::into),
             method => {
                 error!(?method, "RPC used a unsupported method");
                 Err(Error::msg("unknown method"))

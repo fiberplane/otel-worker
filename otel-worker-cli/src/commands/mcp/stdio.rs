@@ -1,5 +1,4 @@
 use anyhow::Result;
-use otel_worker_core::api::client::ApiClient;
 use rust_mcp_schema::schema_utils::{
     ClientJsonrpcRequest, ClientMessage, RequestFromClient, ResultFromServer, RpcErrorCodes,
     ServerJsonrpcResponse, ServerMessage,
@@ -7,14 +6,12 @@ use rust_mcp_schema::schema_utils::{
 use rust_mcp_schema::{ClientRequest, JsonrpcError};
 use std::io::Write;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::broadcast::Sender;
 use tracing::{debug, error, info};
 
-pub(crate) async fn serve(
-    notifications_tx: Sender<ServerMessage>,
-    api_client: ApiClient,
-) -> Result<()> {
-    let mut notifications_rx = notifications_tx.subscribe();
+use super::McpState;
+
+pub(crate) async fn serve(state: McpState) -> Result<()> {
+    let mut notifications_rx = state.notifications.subscribe();
 
     // spawn two tasks, one to read lines on stdin, parse payloads, and dispatch
     // to super::*. The other has to read from notifications and serialize them
@@ -37,7 +34,7 @@ pub(crate) async fn serve(
 
             match client_message {
                 ClientMessage::Request(request) => {
-                    handle_client_request(request, &api_client, &notifications_tx).await;
+                    handle_client_request(&state, request).await;
                 }
                 ClientMessage::Notification(notification) => {
                     handle_client_notification(notification).await;
@@ -86,25 +83,21 @@ pub(crate) async fn serve(
     Ok(())
 }
 
-async fn handle_client_request(
-    request: ClientJsonrpcRequest,
-    api_client: &ApiClient,
-    notifications_tx: &Sender<ServerMessage>,
-) {
+async fn handle_client_request(state: &McpState, request: ClientJsonrpcRequest) {
     let result: Result<ResultFromServer> = match request.request {
         RequestFromClient::ClientRequest(client_request) => match client_request {
             ClientRequest::InitializeRequest(inner_request) => {
-                super::handle_initialize(inner_request.params)
+                super::handle_initialize(&state, inner_request.params)
                     .await
                     .map(Into::into)
             }
             ClientRequest::ListResourcesRequest(inner_request) => {
-                super::handle_resources_list(api_client, inner_request.params)
+                super::handle_resources_list(&state, inner_request.params)
                     .await
                     .map(Into::into)
             }
             ClientRequest::ReadResourceRequest(inner_request) => {
-                super::handle_resources_read(api_client, inner_request.params)
+                super::handle_resources_read(&state, inner_request.params)
                     .await
                     .map(Into::into)
             }
@@ -129,7 +122,7 @@ async fn handle_client_request(
         )),
     };
 
-    notifications_tx.send(response).ok();
+    state.reply(response);
 }
 
 async fn handle_client_notification(

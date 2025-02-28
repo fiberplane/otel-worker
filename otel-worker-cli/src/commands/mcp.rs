@@ -53,17 +53,19 @@ pub async fn handle_command(args: Args) -> Result<()> {
         .set_bearer_token(args.otel_worker_token)
         .build();
 
-    // This broadcast pair is used for async communication back to the MCP
-    // client through SSE.
-    let (notifications_tx, _) = broadcast::channel(100);
+    // This broadcast channel is used for async communication back to the MCP
+    // client.
+    let (notifications, _) = broadcast::channel(100);
 
-    let ws_sender = notifications_tx.clone();
+    let ws_sender = notifications.clone();
     let ws_handle = tokio::spawn(async move {
-        info!(?websocket_url, "Connecting to websocket");
+        info!(?websocket_url, "Connecting to otel-worker websocket");
 
         let (mut stream, _resp) = tokio_tungstenite::connect_async(websocket_url)
             .await
             .expect("should be able to connect");
+
+        info!("Connected to otel-worker websocket");
 
         loop {
             let Some(Ok(message)) = stream.next().await else {
@@ -81,25 +83,46 @@ pub async fn handle_command(args: Args) -> Result<()> {
                         let message = ServerMessage::Notification(data.into());
                         ws_sender.send(message).ok();
                     }
-                    _ => debug!("Irrelevant message"),
+                    _ => (),
                 }
             } else {
-                warn!("Received non text message, ignoring");
+                debug!("Received non text message, ignoring");
                 continue;
             }
         }
     });
 
+    let mcp_state = McpState::new(api_client, notifications);
+
     match args.transport {
-        Transport::Stdio => stdio::serve(notifications_tx, api_client).await?,
-        Transport::HttpSse => {
-            http_sse::serve(&args.listen_address, notifications_tx, api_client).await?
-        }
+        Transport::Stdio => stdio::serve(mcp_state).await?,
+        Transport::HttpSse => http_sse::serve(&args.listen_address, mcp_state).await?,
     }
 
     ws_handle.abort();
 
     Ok(())
+}
+
+#[derive(Clone)]
+struct McpState {
+    api_client: ApiClient,
+    notifications: broadcast::Sender<ServerMessage>,
+}
+
+impl McpState {
+    fn new(api_client: ApiClient, notifications: broadcast::Sender<ServerMessage>) -> Self {
+        Self {
+            api_client,
+            notifications,
+        }
+    }
+
+    fn reply(&self, message: ServerMessage) {
+        if let Err(err) = self.notifications.send(message) {
+            warn!(?err, "A reply was send, but client is connected");
+        }
+    }
 }
 
 /// Give the otel_work_url generate the websocket uri. This will convert the
@@ -124,10 +147,13 @@ fn get_ws_url(otel_worker_url: &url::Url) -> Result<http::Uri> {
         .authority(authority)
         .path_and_query(path)
         .build()
-        .context("unable to build URI")
+        .context("unable to build otel-worker websocket URI")
 }
 
-async fn handle_initialize(params: InitializeRequestParams) -> Result<InitializeResult> {
+async fn handle_initialize(
+    _state: &McpState,
+    params: InitializeRequestParams,
+) -> Result<InitializeResult> {
     debug!(?params, "Received initialize message");
 
     const MCP_VERSION: &str = "2024-11-05";
@@ -174,10 +200,10 @@ async fn handle_initialize(params: InitializeRequestParams) -> Result<Initialize
 }
 
 async fn handle_resources_list(
-    client: &ApiClient,
+    McpState { api_client, .. }: &McpState,
     _params: Option<ListResourcesRequestParams>,
 ) -> Result<ListResourcesResult> {
-    let resources = client
+    let resources = api_client
         .trace_list(Some(50), None)
         .await?
         .iter()
@@ -205,7 +231,7 @@ async fn handle_resources_list(
 }
 
 async fn handle_resources_read(
-    client: &ApiClient,
+    McpState { api_client, .. }: &McpState,
     params: ReadResourceRequestParams,
 ) -> Result<ReadResourceResult> {
     debug!(?params, "Received a call on resources_read");
@@ -215,7 +241,7 @@ async fn handle_resources_read(
     };
 
     let contents: Vec<ReadResourceResultContentsItem> = match resource_type {
-        "trace" => client
+        "trace" => api_client
             .span_list(arguments)
             .await
             .expect("Call to list spans failed")
