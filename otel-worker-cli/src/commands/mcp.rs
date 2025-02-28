@@ -28,6 +28,8 @@ pub struct Args {
     #[arg(long, env)]
     pub otel_worker_token: Option<String>,
 
+    /// The type of transport used to communicate between this MCP server and
+    /// the MCP client.
     #[arg(long, env, default_value_t = Transport::Stdio, value_enum)]
     pub transport: Transport,
 
