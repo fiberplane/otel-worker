@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::{self, Sender};
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
 pub(crate) async fn serve(
@@ -132,7 +133,7 @@ async fn sse_handler(
     let initial_event =
         futures::stream::once(async { Ok(Event::default().event("endpoint").data("/messages")) });
 
-    let events = tokio_stream::wrappers::BroadcastStream::new(receiver).map(|message| {
+    let events = BroadcastStream::new(receiver).map(|message| {
         message.map(|message| {
             Event::default()
                 .event("message")
