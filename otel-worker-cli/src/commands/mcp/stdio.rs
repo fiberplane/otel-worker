@@ -63,7 +63,7 @@ pub(crate) async fn serve(
                         .write_all(message.as_bytes())
                         .expect("TODO: should be able to write to stdout");
                     stdout
-                        .write(b"\n")
+                        .write_all(b"\n")
                         .expect("TODO: should be able to write to stdout");
                     stdout.flush().expect("TODO: should be able to flush");
                     debug!("stdout loop has written the message");
