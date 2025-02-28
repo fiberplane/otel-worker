@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
-use axum::response::sse::Event;
 use futures::StreamExt;
 use otel_worker_core::api::client::{self, ApiClient};
-use otel_worker_core::api::models::{ServerMessage, ServerMessageDetails};
+use otel_worker_core::api::models;
+use rust_mcp_schema::schema_utils::ServerMessage;
 use rust_mcp_schema::{
     Implementation, InitializeRequestParams, InitializeResult, ListResourcesRequestParams,
     ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
@@ -10,11 +10,13 @@ use rust_mcp_schema::{
     ServerCapabilitiesResources, TextResourceContents,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 use url::Url;
 
 mod http_sse;
+mod stdio;
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -45,15 +47,15 @@ pub async fn handle_command(args: Args) -> Result<()> {
     // have to worry about error handling inside the [`tokio::task`].
     let websocket_url = get_ws_url(&args.otel_worker_url)?;
 
-    let client = client::builder(args.otel_worker_url)
+    let api_client = client::builder(args.otel_worker_url)
         .set_bearer_token(args.otel_worker_token)
         .build();
 
     // This broadcast pair is used for async communication back to the MCP
     // client through SSE.
-    let (notifications, _) = tokio::sync::broadcast::channel(100);
+    let (notifications_tx, notifications_rx) = broadcast::channel(100);
 
-    let ws_sender = notifications.clone();
+    let ws_sender = notifications_tx.clone();
     let ws_handle = tokio::spawn(async move {
         info!(?websocket_url, "Connecting to websocket");
 
@@ -67,24 +69,15 @@ pub async fn handle_command(args: Args) -> Result<()> {
                 break;
             };
 
-            debug!("Yay message!");
-
             if let Message::Text(content) = message {
-                let msg: ServerMessage =
+                let msg: models::ServerMessage =
                     serde_json::from_str(&content).expect("Should be able to deserialize it");
 
                 match msg.details {
-                    ServerMessageDetails::SpanAdded(_span_added) => {
+                    models::ServerMessageDetails::SpanAdded(_span_added) => {
                         let data = ResourceListChangedNotification::new(None);
-                        ws_sender
-                            .send(
-                                Event::default()
-                                    .event("message")
-                                    .json_data(data)
-                                    .expect("serialization should just work"),
-                            )
-                            .ok();
-                        debug!("list_changed message send");
+                        let message = ServerMessage::Notification(data.into());
+                        ws_sender.send(message).ok();
                     }
                     _ => debug!("Irrelevant message"),
                 }
@@ -96,8 +89,10 @@ pub async fn handle_command(args: Args) -> Result<()> {
     });
 
     match args.transport {
-        Transport::Stdio => todo!("implement me!"),
-        Transport::HttpSse => http_sse::serve(&args.listen_address, notifications, client).await?,
+        Transport::Stdio => stdio::serve(notifications_tx, notifications_rx, api_client).await?,
+        Transport::HttpSse => {
+            http_sse::serve(&args.listen_address, notifications_tx, api_client).await?
+        }
     }
 
     ws_handle.abort();
@@ -137,6 +132,7 @@ async fn handle_initialize(params: InitializeRequestParams) -> Result<Initialize
 
     // We only support one version for now
     if params.protocol_version != MCP_VERSION {
+        debug!(?params, "unsupported version");
         anyhow::bail!("unsupported version")
     }
 
@@ -177,7 +173,7 @@ async fn handle_initialize(params: InitializeRequestParams) -> Result<Initialize
 
 async fn handle_resources_list(
     client: &ApiClient,
-    _params: ListResourcesRequestParams,
+    _params: Option<ListResourcesRequestParams>,
 ) -> Result<ListResourcesResult> {
     let resources = client
         .trace_list()

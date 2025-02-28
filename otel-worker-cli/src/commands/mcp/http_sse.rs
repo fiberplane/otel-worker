@@ -1,29 +1,31 @@
-use anyhow::{Context, Result};
-use async_stream::try_stream;
+use super::{handle_initialize, handle_resources_list, handle_resources_read};
+use anyhow::{Context, Error, Result};
 use axum::extract::{MatchedPath, Request, State};
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
 use axum::routing::{get, post};
-use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
-use axum_jrpc::{JsonRpcExtractor, JsonRpcResponse, Value};
-use futures::Stream;
+use axum_jrpc::JsonRpcExtractor;
+use futures::{Stream, StreamExt};
 use http::StatusCode;
 use otel_worker_core::api::client::ApiClient;
-use std::convert::Infallible;
+use rust_mcp_schema::schema_utils::{
+    ResultFromServer, RpcErrorCodes, ServerJsonrpcResponse, ServerMessage,
+};
+use rust_mcp_schema::{JsonrpcError, RequestId};
 use std::process::exit;
 use std::time::{Duration, Instant};
+use tokio::net::TcpListener;
 use tokio::sync::broadcast::{self, Sender};
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tracing::{debug, error, info, info_span, warn, Instrument};
 
-use super::{handle_initialize, handle_resources_list, handle_resources_read};
-
-pub async fn serve(
+pub(crate) async fn serve(
     listen_address: &str,
-    notifications: broadcast::Sender<Event>,
+    notifications: broadcast::Sender<ServerMessage>,
     api_client: ApiClient,
 ) -> Result<()> {
-    let listener = tokio::net::TcpListener::bind(listen_address)
+    let listener = TcpListener::bind(listen_address)
         .await
         .with_context(|| format!("Failed to bind to address: {}", listen_address))?;
 
@@ -41,7 +43,7 @@ pub async fn serve(
     Ok(())
 }
 
-pub fn build_mcp_service(notifications: Sender<Event>, api_client: ApiClient) -> axum::Router {
+fn build_mcp_service(notifications: Sender<ServerMessage>, api_client: ApiClient) -> axum::Router {
     let state = McpState {
         api_client,
         notifications,
@@ -56,17 +58,12 @@ pub fn build_mcp_service(notifications: Sender<Event>, api_client: ApiClient) ->
 #[derive(Clone)]
 struct McpState {
     api_client: ApiClient,
-    notifications: Sender<Event>,
+    notifications: Sender<ServerMessage>,
 }
 
 impl McpState {
-    fn reply(&self, response: JsonRpcResponse) {
-        let event = Event::default()
-            .event("message")
-            .json_data(response)
-            .expect("unable to serialize data");
-
-        if let Err(err) = self.notifications.send(event) {
+    fn reply(&self, message: ServerMessage) {
+        if let Err(err) = self.notifications.send(message) {
             warn!(?err, "A reply was send, but client is connected");
         }
     }
@@ -79,67 +76,43 @@ async fn json_rpc_handler(
 ) -> impl IntoResponse {
     tokio::spawn(async move {
         let answer_id = req.get_answer_id();
-        let result = match req.method() {
+        let result: Result<ResultFromServer> = match req.method() {
             "initialize" => handle_initialize(req.parse_params().unwrap())
                 .await
-                .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                .unwrap_or_else(|err| {
-                    error!(?err, "initialization failed");
-                    JsonRpcResponse::error(
-                        answer_id,
-                        JsonRpcError::new(
-                            JsonRpcErrorReason::InternalError,
-                            "message".to_string(),
-                            Value::Null,
-                        ),
-                    )
-                }),
+                .map(Into::into),
             "resources/list" => {
                 handle_resources_list(&state.api_client, req.parse_params().unwrap())
                     .await
-                    .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                    .unwrap_or_else(|err| {
-                        error!(?err, "handle_resources_list");
-                        JsonRpcResponse::error(
-                            answer_id,
-                            JsonRpcError::new(
-                                JsonRpcErrorReason::InternalError,
-                                "message".to_string(),
-                                Value::Null,
-                            ),
-                        )
-                    })
+                    .map(Into::into)
             }
             "resources/read" => {
                 handle_resources_read(&state.api_client, req.parse_params().unwrap())
                     .await
-                    .map(|result| JsonRpcResponse::success(answer_id.clone(), result))
-                    .unwrap_or_else(|err| {
-                        error!(?err, "handle_resources_read");
-                        JsonRpcResponse::error(
-                            answer_id,
-                            JsonRpcError::new(
-                                JsonRpcErrorReason::InternalError,
-                                "message".to_string(),
-                                Value::Null,
-                            ),
-                        )
-                    })
+                    .map(Into::into)
             }
             method => {
                 error!(?method, "RPC used a unsupported method");
-                JsonRpcResponse::error(
-                    answer_id,
-                    JsonRpcError::new(
-                        JsonRpcErrorReason::MethodNotFound,
-                        "message".to_string(),
-                        Value::Null,
-                    ),
-                )
+                Err(Error::msg("unknown method"))
             }
         };
 
-        state.reply(result);
+        let id = match answer_id {
+            axum_jrpc::Id::Num(val) => RequestId::Integer(val),
+            axum_jrpc::Id::Str(val) => RequestId::String(val),
+            axum_jrpc::Id::None(_) => panic!("id should be set"),
+        };
+
+        let response: ServerMessage = match result {
+            Ok(result) => ServerMessage::Response(ServerJsonrpcResponse::new(id, result)),
+            Err(_) => ServerMessage::Error(JsonrpcError::create(
+                id,
+                RpcErrorCodes::INTERNAL_ERROR,
+                "error_message".to_string(),
+                None,
+            )),
+        };
+
+        state.reply(response);
     });
 
     StatusCode::ACCEPTED
@@ -148,30 +121,27 @@ async fn json_rpc_handler(
 #[tracing::instrument(skip(state))]
 async fn sse_handler(
     State(state): State<McpState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Sse<impl Stream<Item = Result<Event, BroadcastStreamRecvError>>> {
     debug!("MCP client connected to the SSE handler");
 
     // We will subscribe to the global sender and convert those messages into
     // a stream, which in turn gets converted into SSE events.
-    let mut receiver = state.notifications.subscribe();
-    let stream = try_stream! {
-        loop {
-            let recv = receiver.recv().await.expect("should work");
-            yield recv;
-        }
-    };
+    let receiver = state.notifications.subscribe();
 
-    // Part of the SSE protocol is sending the location where the client needs
-    // to do its POST request. This will be sent to the channel which will be
-    // queued there until the client is connected to the SSE stream.
-    if let Err(err) = state
-        .notifications
-        .send(Event::default().event("endpoint").data("/messages"))
-    {
-        error!(?err, "unable to send initial message to MCP client");
-    }
+    // This message needs to be send as soon as the client accesses the page.
+    let initial_event =
+        futures::stream::once(async { Ok(Event::default().event("endpoint").data("/messages")) });
 
-    Sse::new(stream).keep_alive(
+    let events = tokio_stream::wrappers::BroadcastStream::new(receiver).map(|message| {
+        message.map(|message| {
+            Event::default()
+                .event("message")
+                .json_data(message)
+                .expect("unable to serialize data")
+        })
+    });
+
+    Sse::new(initial_event.chain(events)).keep_alive(
         axum::response::sse::KeepAlive::new()
             .interval(Duration::from_secs(5))
             .text("keep-alive-text"),
