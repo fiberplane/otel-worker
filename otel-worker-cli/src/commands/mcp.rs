@@ -178,7 +178,7 @@ async fn handle_resources_list(
     _params: Option<ListResourcesRequestParams>,
 ) -> Result<ListResourcesResult> {
     let resources = client
-        .trace_list()
+        .trace_list(Some(50), None)
         .await?
         .iter()
         .map(|trace| {
