@@ -8,9 +8,9 @@ use rust_mcp_schema::schema_utils::{
 };
 use rust_mcp_schema::{
     ClientRequest, Implementation, InitializeRequestParams, InitializeResult, JsonrpcError,
-    ListResourcesRequestParams, ListResourcesResult, ReadResourceRequestParams, ReadResourceResult,
-    ReadResourceResultContentsItem, Resource, ResourceListChangedNotification, ServerCapabilities,
-    ServerCapabilitiesResources, TextResourceContents,
+    ListResourcesRequestParams, ListResourcesResult, PingRequestParams, ReadResourceRequestParams,
+    ReadResourceResult, ReadResourceResultContentsItem, Resource, ResourceListChangedNotification,
+    ServerCapabilities, ServerCapabilitiesResources, TextResourceContents,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -265,6 +265,16 @@ async fn handle_resources_read(
     Ok(result)
 }
 
+async fn handle_ping(
+    _state: &McpState,
+    _params: Option<PingRequestParams>,
+) -> Result<rust_mcp_schema::Result> {
+    Ok(rust_mcp_schema::Result {
+        meta: None,
+        extra: None,
+    })
+}
+
 // #[cfg(test)]
 // mod test {
 //     use axum_jrpc::JsonRpcRequest;
@@ -322,6 +332,9 @@ async fn handle_client_request(state: &McpState, request: ClientJsonrpcRequest) 
                     .await
                     .map(Into::into)
             }
+            ClientRequest::PingRequest(inner_request) => handle_ping(state, inner_request.params)
+                .await
+                .map(Into::into),
             _inner_request => {
                 error!(method = request.method, "Received unsupported requests");
                 return;
