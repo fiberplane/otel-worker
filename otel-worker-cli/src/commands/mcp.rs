@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
-mod http_sse;
+mod sse;
 mod stdio;
 
 #[derive(clap::Args, Debug)]
@@ -36,13 +36,14 @@ pub struct Args {
     #[arg(long, env, default_value_t = Transport::Stdio, value_enum)]
     pub transport: Transport,
 
-    /// The address that the MCP server will listen on.
+    /// The address that the MCP server will listen on. Only available with SSE
+    /// transport
     #[arg(
         short,
         long,
         env,
         default_value = "127.0.0.1:3001",
-        help_heading = "http with sse"
+        help_heading = "SSE"
     )]
     pub listen_address: String,
 }
@@ -94,7 +95,7 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
     match args.transport {
         Transport::Stdio => stdio::serve(mcp_state).await?,
-        Transport::HttpSse => http_sse::serve(&args.listen_address, mcp_state).await?,
+        Transport::Sse => sse::serve(&args.listen_address, mcp_state).await?,
     }
 
     ws_handle.abort();
@@ -275,26 +276,13 @@ async fn handle_ping(
     })
 }
 
-// #[cfg(test)]
-// mod test {
-//     use axum_jrpc::JsonRpcRequest;
-
-// // Currently we are not able to respond to the Ping command as that doesn't
-// // send a params property, which is required by serde.
-//     #[test]
-//     fn ping_extractor_test() {
-//         let input = r#"{"method":"ping","jsonrpc":"2.0","id":1}"#;
-//         let parsed: JsonRpcRequest = serde_json::from_str(input).unwrap();
-//     }
-// }
-
 #[derive(Debug, Default, Clone, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Transport {
     #[default]
     Stdio,
 
-    HttpSse,
+    Sse,
 }
 
 async fn handle_client_message(state: &McpState, client_message: ClientMessage) {
