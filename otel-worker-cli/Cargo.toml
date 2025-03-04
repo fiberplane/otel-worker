@@ -22,11 +22,7 @@ axum = { workspace = true, default-features = false, features = [
 ] }
 bytes = { version = "1.6" }
 clap = { workspace = true, features = ["derive", "env"] }
-otel-worker-core = { version = "0.1.0", path = "../otel-worker-core", features = [
-    "libsql",
-    "client",
-] }
-otel-worker-macros = { version = "0.1.0", path = "../otel-worker-macros" }
+futures = "0.3"
 futures-util = { version = "0.3" }
 hex = { version = "0.4" }
 http = { version = "1.1" }
@@ -49,8 +45,14 @@ opentelemetry-proto = { version = "0.27", features = [
     "with-serde",
     "with-schemars",
 ] }
+otel-worker-core = { version = "0.1.0", path = "../otel-worker-core", features = [
+    "libsql",
+    "client",
+] }
+otel-worker-macros = { version = "0.1.0", path = "../otel-worker-macros" }
 prost = { version = "0.13" }
 rand = { version = "0.8.5" }
+rust-mcp-schema = { version = "0.1.0", features = ["2024_11_05"] }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -59,6 +61,7 @@ strum = { version = "0.26", features = ["derive"] }
 thiserror = { version = "2.0" }
 time = { version = "0.3.17", features = ["serde-human-readable"] }
 tokio = { version = "1.40", features = ["rt-multi-thread", "signal", "fs"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24", features = [
     "rustls-tls-webpki-roots",
 ] } # This should be kept the same as whatever Axum has

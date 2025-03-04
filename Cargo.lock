@@ -1571,6 +1571,7 @@ dependencies = [
  "axum",
  "bytes",
  "clap",
+ "futures",
  "futures-util",
  "hex",
  "http",
@@ -1586,6 +1587,7 @@ dependencies = [
  "otel-worker-macros",
  "prost",
  "rand",
+ "rust-mcp-schema",
  "schemars",
  "serde",
  "serde_json",
@@ -1595,6 +1597,7 @@ dependencies = [
  "thiserror 2.0.11",
  "time",
  "tokio",
+ "tokio-stream",
  "tokio-tungstenite",
  "toml",
  "tonic",
@@ -1983,6 +1986,16 @@ dependencies = [
  "spin",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rust-mcp-schema"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f91f421769adc2ff7e13daa277a61abff6c8eeb6cf8ae89508f5d59b7baf6306"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2533,6 +2546,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

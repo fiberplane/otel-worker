@@ -79,7 +79,7 @@ impl Span {
                     };
 
                     let events: Vec<_> = span.events.into_iter().map(Into::into).collect();
-                    let links: Vec<_> = span.links.into_iter().map(Into::into).collect();
+                    let links: Vec<_> = span.links.into_iter().collect();
 
                     let trace_id = span.trace_id.into();
                     let span_id = span.span_id.into();
@@ -103,7 +103,7 @@ impl Span {
                         attributes,
                         scope_attributes: scope_attributes.clone(),
                         resource_attributes: resource_attributes.clone(),
-                        status: span.status.map(Into::into),
+                        status: span.status,
                         events,
                         links,
                     };
