@@ -1,6 +1,6 @@
 use super::McpState;
 use anyhow::{Context, Result};
-use axum::extract::{MatchedPath, Request, State};
+use axum::extract::{MatchedPath, Query, Request, State};
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
 use axum::response::{IntoResponse, Sse};
@@ -9,11 +9,12 @@ use axum::Json;
 use futures::{Stream, StreamExt};
 use http::StatusCode;
 use rust_mcp_schema::schema_utils::ClientMessage;
+use serde::Deserialize;
+use std::convert::Infallible;
 use std::process::exit;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, info_span, warn, Instrument};
 
 pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
@@ -43,39 +44,55 @@ fn build_mcp_service(state: McpState) -> axum::Router {
         .with_state(state)
 }
 
-#[tracing::instrument(skip(state))]
-async fn json_rpc_handler(
-    State(state): State<McpState>,
-    Json(client_message): Json<ClientMessage>,
-) -> impl IntoResponse {
-    tokio::spawn(async move {
-        super::handle_client_message(&state, client_message).await;
-    });
-
-    StatusCode::ACCEPTED
+#[derive(Debug, Deserialize, Default)]
+struct JsonRpcQuery {
+    pub session_id: Option<String>,
 }
 
 #[tracing::instrument(skip(state))]
+async fn json_rpc_handler(
+    State(mut state): State<McpState>,
+    Query(JsonRpcQuery { session_id, .. }): Query<JsonRpcQuery>,
+    Json(client_message): Json<ClientMessage>,
+) -> impl IntoResponse {
+    match session_id {
+        Some(session_id) => {
+            let Some(session) = state.get_session(session_id).await else {
+                return StatusCode::IM_A_TEAPOT;
+            };
+
+            tokio::spawn(async move {
+                super::handle_client_message(&state, session, client_message).await;
+            });
+
+            StatusCode::ACCEPTED
+        }
+        None => StatusCode::IM_A_TEAPOT,
+    }
+}
+
+// #[tracing::instrument(skip(state))]
 async fn sse_handler(
-    State(state): State<McpState>,
-) -> Sse<impl Stream<Item = Result<Event, BroadcastStreamRecvError>>> {
+    State(mut state): State<McpState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     debug!("MCP client connected to the SSE handler");
 
-    // We will subscribe to the global sender and convert those messages into
-    // a stream, which in turn gets converted into SSE events.
-    let receiver = state.notifications.subscribe();
+    let (session_id, _mcp_session, session_notifications) = state.register_session().await;
 
     // This message needs to be send as soon as the client accesses the page.
-    let initial_event =
-        futures::stream::once(async { Ok(Event::default().event("endpoint").data("/messages")) });
+    let initial_event = futures::stream::once(async move {
+        Ok(Event::default()
+            .event("endpoint")
+            .data(format!("/messages?session_id={}", session_id)))
+    });
 
-    let events = BroadcastStream::new(receiver).map(|message| {
-        message.map(|message| {
-            Event::default()
-                .event("message")
-                .json_data(message)
-                .expect("unable to serialize data")
-        })
+    // This stream will contain all the ServerMessages which are converted to
+    // Sse Events.
+    let events = ReceiverStream::new(session_notifications).map(|message| {
+        Ok(Event::default()
+            .event("message")
+            .json_data(message)
+            .expect("unable to serialize data"))
     });
 
     Sse::new(initial_event.chain(events)).keep_alive(
@@ -88,6 +105,8 @@ async fn sse_handler(
 async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
     let start_time = Instant::now();
 
+    let query = req.uri().query().unwrap_or_default();
+
     let method = req.method().to_string();
     let matched_path = req
         .extensions()
@@ -98,7 +117,8 @@ async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
         %method,
         path = %req.uri().path(),
         matched_path = %matched_path.as_deref().unwrap_or_default(),
-        version = ?req.version());
+        version = ?req.version(),
+        query=?query);
 
     let res = next.run(req).instrument(span.clone()).await;
 
