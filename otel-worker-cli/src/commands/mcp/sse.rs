@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use axum::extract::{MatchedPath, Query, Request, State};
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
-use axum::response::{IntoResponse, Sse};
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::Json;
 use futures::{Stream, StreamExt};
@@ -54,24 +54,31 @@ async fn json_rpc_handler(
     State(mut state): State<McpState>,
     Query(JsonRpcQuery { session_id, .. }): Query<JsonRpcQuery>,
     Json(client_message): Json<ClientMessage>,
-) -> impl IntoResponse {
+) -> Response {
     match session_id {
         Some(session_id) => {
-            let Some(session) = state.get_session(session_id).await else {
-                return StatusCode::IM_A_TEAPOT;
+            let Some(session) = state.get_session(&session_id).await else {
+                debug!(
+                    ?session_id,
+                    "json-rpc endpoint retrieved a sessions which doesn't exists"
+                );
+                return (StatusCode::BAD_REQUEST, "session not found").into_response();
             };
 
             tokio::spawn(async move {
                 super::handle_client_message(&state, session, client_message).await;
             });
 
-            StatusCode::ACCEPTED
+            StatusCode::ACCEPTED.into_response()
         }
-        None => StatusCode::IM_A_TEAPOT,
+        None => {
+            debug!("Received call to json-rpc endpoint without a session_id");
+            return (StatusCode::BAD_REQUEST, "session_id is required").into_response();
+        }
     }
 }
 
-// #[tracing::instrument(skip(state))]
+#[tracing::instrument(skip(state))]
 async fn sse_handler(
     State(mut state): State<McpState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {

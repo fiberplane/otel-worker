@@ -139,8 +139,8 @@ impl McpState {
         }
     }
 
-    async fn get_session(&mut self, session_id: impl Into<String>) -> Option<McpSession> {
-        self.sessions.read().await.get(&session_id.into()).cloned()
+    async fn get_session(&mut self, session_id: impl AsRef<str>) -> Option<McpSession> {
+        self.sessions.read().await.get(session_id.as_ref()).cloned()
     }
 
     /// Send a message to all MCP clients.
