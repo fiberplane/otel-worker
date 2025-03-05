@@ -77,13 +77,13 @@ async fn sse_handler(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     debug!("MCP client connected to the SSE handler");
 
-    let (session_id, _mcp_session, session_notifications) = state.register_session().await;
+    let (session_id, session_notifications) = state.register_session().await;
 
     // This message needs to be send as soon as the client accesses the page.
     let initial_event = futures::stream::once(async move {
         Ok(Event::default()
             .event("endpoint")
-            .data(format!("/messages?session_id={}", session_id)))
+            .data(format!("/messages?session_id={session_id}")))
     });
 
     // This stream will contain all the ServerMessages which are converted to
@@ -105,8 +105,6 @@ async fn sse_handler(
 async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
     let start_time = Instant::now();
 
-    let query = req.uri().query().unwrap_or_default();
-
     let method = req.method().to_string();
     let matched_path = req
         .extensions()
@@ -117,8 +115,7 @@ async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
         %method,
         path = %req.uri().path(),
         matched_path = %matched_path.as_deref().unwrap_or_default(),
-        version = ?req.version(),
-        query=?query);
+        version = ?req.version());
 
     let res = next.run(req).instrument(span.clone()).await;
 

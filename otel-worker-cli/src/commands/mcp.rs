@@ -120,7 +120,7 @@ impl McpState {
         }
     }
 
-    async fn register_session(&mut self) -> (String, McpSession, Receiver<ServerMessage>) {
+    async fn register_session(&mut self) -> (String, Receiver<ServerMessage>) {
         let mut id: i32 = 0;
         loop {
             // TODO: Refactor poor mans id management to use UUID
@@ -132,7 +132,8 @@ impl McpState {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(entry) => {
                     let (mcp_session, notifications_rx) = McpSession::new();
-                    break (id, entry.insert(mcp_session).clone(), notifications_rx);
+                    entry.insert(mcp_session);
+                    break (id, notifications_rx);
                 }
             }
         }
