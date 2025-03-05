@@ -55,27 +55,27 @@ async fn json_rpc_handler(
     Query(JsonRpcQuery { session_id, .. }): Query<JsonRpcQuery>,
     Json(client_message): Json<ClientMessage>,
 ) -> Response {
-    match session_id {
-        Some(session_id) => {
-            let Some(session) = state.get_session(&session_id).await else {
-                debug!(
-                    ?session_id,
-                    "json-rpc endpoint retrieved a sessions which doesn't exists"
-                );
-                return (StatusCode::BAD_REQUEST, "session not found").into_response();
-            };
+    // First make sure that the request actually comes with a session_id
+    let Some(session_id) = session_id else {
+        debug!("Received call to json-rpc endpoint without a session_id");
+        return (StatusCode::BAD_REQUEST, "session_id is required").into_response();
+    };
 
-            tokio::spawn(async move {
-                super::handle_client_message(&state, session, client_message).await;
-            });
+    // Then make sure the session actually exists
+    let Some(session) = state.get_session(&session_id).await else {
+        debug!(
+            ?session_id,
+            "json-rpc endpoint retrieved a sessions which doesn't exists"
+        );
+        return (StatusCode::BAD_REQUEST, "session not found").into_response();
+    };
 
-            StatusCode::ACCEPTED.into_response()
-        }
-        None => {
-            debug!("Received call to json-rpc endpoint without a session_id");
-            return (StatusCode::BAD_REQUEST, "session_id is required").into_response();
-        }
-    }
+    // Handle to message in a separate task and immediately return ACCEPTED
+    tokio::spawn(async move {
+        super::handle_client_message(&state, session, client_message).await;
+    });
+
+    StatusCode::ACCEPTED.into_response()
 }
 
 #[tracing::instrument(skip(state))]
