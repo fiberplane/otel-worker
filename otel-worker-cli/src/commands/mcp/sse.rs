@@ -65,7 +65,7 @@ async fn json_rpc_handler(
     let Some(session) = state.get_session(&session_id).await else {
         debug!(
             ?session_id,
-            "json-rpc endpoint retrieved a sessions which doesn't exists"
+            "json-rpc endpoint was called with a session_id which doesn't exists"
         );
         return (StatusCode::BAD_REQUEST, "session not found").into_response();
     };
