@@ -3,14 +3,15 @@ use futures::StreamExt;
 use otel_worker_core::api::client::{self, ApiClient};
 use otel_worker_core::api::models;
 use rust_mcp_schema::schema_utils::{
-    ClientJsonrpcRequest, ClientMessage, RequestFromClient, ResultFromServer, RpcErrorCodes,
-    ServerJsonrpcResponse, ServerMessage,
+    ClientJsonrpcRequest, ClientMessage, NotificationFromServer, RequestFromClient,
+    RequestFromServer, ResultFromServer, RpcErrorCodes, ServerJsonrpcNotification,
+    ServerJsonrpcRequest, ServerJsonrpcResponse, ServerMessage,
 };
 use rust_mcp_schema::{
     ClientRequest, Implementation, InitializeRequestParams, InitializeResult, JsonrpcError,
-    ListResourcesRequestParams, ListResourcesResult, PingRequestParams, ReadResourceRequestParams,
-    ReadResourceResult, ReadResourceResultContentsItem, RequestId, Resource,
-    ResourceListChangedNotification, ServerCapabilities, ServerCapabilitiesResources,
+    JsonrpcErrorError, ListResourcesRequestParams, ListResourcesResult, PingRequestParams,
+    ReadResourceRequestParams, ReadResourceResult, ReadResourceResultContentsItem, RequestId,
+    Resource, ResourceListChangedNotification, ServerCapabilities, ServerCapabilitiesResources,
     TextResourceContents,
 };
 use serde::{Deserialize, Serialize};
@@ -174,10 +175,34 @@ impl McpSession {
         }
     }
 
+    /// Send a json-rpc request to MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_request(&self, request_id: RequestId, request: impl Into<RequestFromServer>) {
+        let request = ServerJsonrpcRequest::new(request_id, request.into());
+        let message = ServerMessage::Request(request);
+        self.send_message(message).await
+    }
+
     /// Send a json-rpc response to MCP client connected to this session.
-    async fn send_response(&self, request_id: RequestId, message: impl Into<ResultFromServer>) {
-        let response = ServerJsonrpcResponse::new(request_id, message.into());
+    async fn send_response(&self, request_id: RequestId, response: impl Into<ResultFromServer>) {
+        let response = ServerJsonrpcResponse::new(request_id, response.into());
         let message = ServerMessage::Response(response);
+        self.send_message(message).await
+    }
+
+    /// Send a json-rpc error to MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_error(&self, request_id: RequestId, error: impl Into<JsonrpcErrorError>) {
+        let error = JsonrpcError::new(error.into(), request_id);
+        let message = ServerMessage::Error(error);
+        self.send_message(message).await
+    }
+
+    /// Send a json-rpc notification to the MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_notification(&self, notification: impl Into<NotificationFromServer>) {
+        let notification = ServerJsonrpcNotification::new(notification.into());
+        let message = ServerMessage::Notification(notification);
         self.send_message(message).await
     }
 }
@@ -420,14 +445,12 @@ async fn handle_client_request(
     };
 
     if let Err(err) = result {
-        let message = ServerMessage::Error(JsonrpcError::create(
-            request_id,
-            RpcErrorCodes::INTERNAL_ERROR,
-            err.to_string(),
-            None,
-        ));
-
-        session.send_message(message).await;
+        session
+            .send_error(
+                request_id,
+                JsonrpcErrorError::new(RpcErrorCodes::INTERNAL_ERROR, err.to_string(), None),
+            )
+            .await;
     }
 }
 
