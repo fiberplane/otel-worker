@@ -87,9 +87,8 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
                 // We are only interested in 1 event, so we just ignore everything else
                 if let models::ServerMessageDetails::SpanAdded(_span_added) = msg.details {
-                    let data = ResourceListChangedNotification::new(None);
-                    let message = ServerMessage::Notification(data.into());
-                    ws_state.broadcast(message).await;
+                    let notification = ResourceListChangedNotification::new(None);
+                    ws_state.broadcast_notification(notification).await;
                 }
             }
         }
@@ -148,6 +147,15 @@ impl McpState {
         for session in sessions.values() {
             session.send_message(message.clone()).await
         }
+    }
+
+    /// Send a json-rpc notification to all MCP clients connected to this
+    /// instance.
+    #[allow(dead_code)]
+    async fn broadcast_notification(&self, notification: impl Into<NotificationFromServer>) {
+        let notification = ServerJsonrpcNotification::new(notification.into());
+        let message = ServerMessage::Notification(notification);
+        self.broadcast(message).await
     }
 }
 
