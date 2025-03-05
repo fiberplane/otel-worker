@@ -17,11 +17,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::Receiver;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 use url::Url;
+use uuid::Uuid;
 
 mod sse;
 mod stdio;
@@ -120,12 +120,9 @@ impl McpState {
         }
     }
 
-    async fn register_session(&mut self) -> (String, Receiver<ServerMessage>) {
-        let mut id: i32 = 0;
+    async fn register_session(&mut self) -> (String, mpsc::Receiver<ServerMessage>) {
         loop {
-            // TODO: Refactor poor mans id management to use UUID
-            id += 1;
-            let id = format!("random-id-{id}");
+            let id = Uuid::new_v4().to_string();
 
             let mut sessions = self.sessions.write().await;
             match sessions.entry(id.clone()) {
@@ -159,7 +156,7 @@ struct McpSession {
 }
 
 impl McpSession {
-    pub fn new() -> (Self, Receiver<ServerMessage>) {
+    pub fn new() -> (Self, mpsc::Receiver<ServerMessage>) {
         let (notifications_tx, notifications_rx) = mpsc::channel(100);
 
         (
