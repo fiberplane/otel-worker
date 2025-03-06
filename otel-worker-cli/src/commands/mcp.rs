@@ -395,7 +395,7 @@ pub enum Transport {
 
 async fn handle_client_message(
     state: &McpState,
-    session: McpSession,
+    session: &McpSession,
     client_message: ClientMessage,
 ) {
     match client_message {
@@ -416,7 +416,7 @@ async fn handle_client_message(
 
 async fn handle_client_request(
     state: &McpState,
-    session: McpSession,
+    session: &McpSession,
     request: ClientJsonrpcRequest,
 ) {
     let request_id = request.id.clone();
@@ -464,7 +464,7 @@ async fn handle_client_request(
 
 async fn handle_client_notification(
     _state: &McpState,
-    _session: McpSession,
+    _session: &McpSession,
     notification: rust_mcp_schema::schema_utils::ClientJsonrpcNotification,
 ) {
     info!(?notification, "Received a notification!");
@@ -472,12 +472,12 @@ async fn handle_client_notification(
 
 async fn handle_client_response(
     _state: &McpState,
-    _session: McpSession,
+    _session: &McpSession,
     response: rust_mcp_schema::schema_utils::ClientJsonrpcResponse,
 ) {
     info!(?response, "Received a response!");
 }
 
-async fn handle_client_error(_state: &McpState, _session: McpSession, error: JsonrpcError) {
+async fn handle_client_error(_state: &McpState, _session: &McpSession, error: JsonrpcError) {
     info!(?error, "Received a client error!");
 }

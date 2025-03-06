@@ -72,7 +72,7 @@ async fn json_rpc_handler(
 
     // Handle to message in a separate task and immediately return ACCEPTED
     tokio::spawn(async move {
-        super::handle_client_message(&state, session, client_message).await;
+        super::handle_client_message(&state, &session, client_message).await;
     });
 
     StatusCode::ACCEPTED.into_response()

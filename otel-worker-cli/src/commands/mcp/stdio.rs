@@ -31,7 +31,7 @@ pub(crate) async fn serve(mut state: McpState) -> Result<()> {
             let client_message: ClientMessage =
                 serde_json::from_str(&line).expect("todo: handle error state");
 
-            super::handle_client_message(&state, session.clone(), client_message).await
+            super::handle_client_message(&state, &session, client_message).await
         }
     });
 
