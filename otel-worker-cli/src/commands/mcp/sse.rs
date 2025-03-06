@@ -9,7 +9,7 @@ use axum::Json;
 use futures::{Stream, StreamExt};
 use http::StatusCode;
 use rust_mcp_schema::schema_utils::ClientMessage;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::process::exit;
 use std::time::{Duration, Instant};
@@ -44,9 +44,16 @@ fn build_mcp_service(state: McpState) -> axum::Router {
         .with_state(state)
 }
 
-#[derive(Debug, Deserialize, Default)]
+/// The querystring parameter associated with the json-rpc endpoint.
+#[derive(Debug, Serialize, Deserialize, Default)]
 struct JsonRpcQuery {
     pub session_id: Option<String>,
+}
+
+impl JsonRpcQuery {
+    fn new(session_id: Option<String>) -> Self {
+        Self { session_id }
+    }
 }
 
 #[tracing::instrument(skip(state))]
@@ -88,9 +95,11 @@ async fn sse_handler(
 
     // This message needs to be send as soon as the client accesses the page.
     let initial_event = futures::stream::once(async move {
+        let querystring = serde_urlencoded::to_string(JsonRpcQuery::new(Some(session_id)))
+            .expect("querystring encoding is expected to work");
         Ok(Event::default()
             .event("endpoint")
-            .data(format!("/messages?session_id={session_id}")))
+            .data(format!("/messages?{querystring}")))
     });
 
     // This stream will contain all the ServerMessages which are converted to

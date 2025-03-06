@@ -1603,6 +1603,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "serde_with",
  "strum",
  "test-log",
