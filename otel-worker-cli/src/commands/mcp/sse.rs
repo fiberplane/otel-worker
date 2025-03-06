@@ -91,7 +91,7 @@ async fn sse_handler(
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     debug!("MCP client connected to the SSE handler");
 
-    let (session_id, session_notifications) = state.register_session().await;
+    let (session_id, messages) = state.register_session().await;
 
     // This message needs to be send as soon as the client accesses the page.
     let initial_event = futures::stream::once(async move {
@@ -104,7 +104,7 @@ async fn sse_handler(
 
     // This stream will contain all the ServerMessages which are converted to
     // Sse Events.
-    let events = ReceiverStream::new(session_notifications).map(|message| {
+    let events = ReceiverStream::new(messages).map(|message| {
         Ok(Event::default()
             .event("message")
             .json_data(message)

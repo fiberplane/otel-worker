@@ -15,7 +15,7 @@ pub(crate) async fn serve(mut state: McpState) -> Result<()> {
         .expect("should have session");
 
     // spawn two tasks, one to read lines on stdin, parse payloads, and dispatch
-    // to super::*. The other has to read from notifications and serialize them
+    // to super::*. The other has to read from messages and serialize them
     // to stdout.
     let stdin_loop = tokio::spawn(async move {
         let mut stdin = BufReader::new(tokio::io::stdin());
@@ -52,7 +52,7 @@ pub(crate) async fn serve(mut state: McpState) -> Result<()> {
                     debug!("stdout loop has written the message");
                 }
                 None => {
-                    error!("TODO: Unable to read from notifications channel");
+                    error!("TODO: Unable to read from messages channel");
                     break;
                 }
             };

@@ -128,9 +128,9 @@ impl McpState {
             match sessions.entry(id.clone()) {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(entry) => {
-                    let (mcp_session, notifications_rx) = McpSession::new();
+                    let (mcp_session, messages) = McpSession::new();
                     entry.insert(mcp_session);
-                    break (id, notifications_rx);
+                    break (id, messages);
                 }
             }
         }
@@ -161,24 +161,31 @@ impl McpState {
 
 #[derive(Debug, Clone)]
 struct McpSession {
-    notifications: mpsc::Sender<ServerMessage>,
+    /// This channel is used to send message to the receiver which should
+    /// send these message to the MCP client using the transport that is being
+    /// used.
+    ///
+    /// The receiver channel is returned during the creation of the [`McpSession`].
+    messages: mpsc::Sender<ServerMessage>,
 }
 
 impl McpSession {
+    /// Create a new [`McpSession`]. The [`mpsc::Receiver`] returned will
+    /// receive any message intended for the Mcp client.
     pub fn new() -> (Self, mpsc::Receiver<ServerMessage>) {
-        let (notifications_tx, notifications_rx) = mpsc::channel(100);
+        let (messages_tx, messages_rx) = mpsc::channel(100);
 
         (
             Self {
-                notifications: notifications_tx,
+                messages: messages_tx,
             },
-            notifications_rx,
+            messages_rx,
         )
     }
 
     /// Send a message to this MCP client connected to this session.
     async fn send_message(&self, message: ServerMessage) {
-        if self.notifications.send(message).await.is_err() {
+        if self.messages.send(message).await.is_err() {
             warn!("A reply was send, but no client is connected");
         }
     }
