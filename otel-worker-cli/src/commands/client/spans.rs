@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
-use otel_worker_core::api::client;
+use otel_worker_core::api::client::ApiClient;
 use std::io::stdout;
 use url::Url;
 
@@ -46,7 +46,7 @@ pub struct GetArgs {
 }
 
 async fn handle_get(args: GetArgs) -> Result<()> {
-    let api_client = client::builder(args.base_url.clone())
+    let api_client = ApiClient::builder(args.base_url.clone())
         .set_bearer_token(args.auth_token)
         .build();
 
@@ -70,7 +70,7 @@ pub struct ListArgs {
 }
 
 async fn handle_list(args: ListArgs) -> Result<()> {
-    let api_client = client::builder(args.base_url.clone())
+    let api_client = ApiClient::builder(args.base_url.clone())
         .set_bearer_token(args.auth_token)
         .build();
 
@@ -97,7 +97,7 @@ pub struct DeleteArgs {
 }
 
 async fn handle_delete(args: DeleteArgs) -> Result<()> {
-    let api_client = client::builder(args.base_url.clone())
+    let api_client = ApiClient::builder(args.base_url.clone())
         .set_bearer_token(args.auth_token)
         .build();
 

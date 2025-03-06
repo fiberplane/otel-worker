@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
-use otel_worker_core::api::client::{self, ApiClient};
+use otel_worker_core::api::client::ApiClient;
 use otel_worker_core::api::models;
 use rust_mcp_schema::schema_utils::{
     ClientJsonrpcRequest, ClientMessage, NotificationFromServer, RequestFromClient,
@@ -59,7 +59,7 @@ pub async fn handle_command(args: Args) -> Result<()> {
     // have to worry about error handling inside the [`tokio::task`].
     let websocket_url = get_ws_url(&args.otel_worker_url)?;
 
-    let api_client = client::builder(args.otel_worker_url)
+    let api_client = ApiClient::builder(args.otel_worker_url)
         .set_bearer_token(args.otel_worker_token)
         .build();
 
