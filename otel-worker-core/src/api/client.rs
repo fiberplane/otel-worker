@@ -26,10 +26,6 @@ use tracing::trace;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 
-pub fn builder(base_url: Url) -> ApiClientBuilder {
-    ApiClientBuilder::new(base_url)
-}
-
 pub struct ApiClientBuilder {
     base_url: Url,
     bearer_token: Option<String>,
@@ -91,6 +87,10 @@ impl ApiClient {
         Self {
             inner: Arc::new(inner),
         }
+    }
+
+    pub fn builder(base_url: Url) -> ApiClientBuilder {
+        ApiClientBuilder::new(base_url)
     }
 }
 

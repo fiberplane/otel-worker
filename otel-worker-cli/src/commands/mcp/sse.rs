@@ -1,19 +1,20 @@
 use super::McpState;
 use anyhow::{Context, Result};
-use axum::extract::{MatchedPath, Request, State};
+use axum::extract::{MatchedPath, Query, Request, State};
 use axum::middleware::{self, Next};
 use axum::response::sse::Event;
-use axum::response::{IntoResponse, Sse};
+use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::Json;
 use futures::{Stream, StreamExt};
 use http::StatusCode;
 use rust_mcp_schema::schema_utils::ClientMessage;
+use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::process::exit;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, info_span, warn, Instrument};
 
 pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
@@ -43,39 +44,71 @@ fn build_mcp_service(state: McpState) -> axum::Router {
         .with_state(state)
 }
 
+/// The querystring parameter associated with the json-rpc endpoint.
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct JsonRpcQuery {
+    pub session_id: Option<String>,
+}
+
+impl JsonRpcQuery {
+    fn new(session_id: Option<String>) -> Self {
+        Self { session_id }
+    }
+}
+
 #[tracing::instrument(skip(state))]
 async fn json_rpc_handler(
-    State(state): State<McpState>,
+    State(mut state): State<McpState>,
+    Query(JsonRpcQuery { session_id, .. }): Query<JsonRpcQuery>,
     Json(client_message): Json<ClientMessage>,
-) -> impl IntoResponse {
+) -> Response {
+    // First make sure that the request actually comes with a session_id
+    let Some(session_id) = session_id else {
+        debug!("Received call to json-rpc endpoint without a session_id");
+        return (StatusCode::BAD_REQUEST, "session_id is required").into_response();
+    };
+
+    // Then make sure the session actually exists
+    let Some(session) = state.get_session(&session_id).await else {
+        debug!(
+            ?session_id,
+            "json-rpc endpoint was called with a session_id which doesn't exists"
+        );
+        return (StatusCode::BAD_REQUEST, "session not found").into_response();
+    };
+
+    // Handle to message in a separate task and immediately return ACCEPTED
     tokio::spawn(async move {
-        super::handle_client_message(&state, client_message).await;
+        super::handle_client_message(&state, &session, client_message).await;
     });
 
-    StatusCode::ACCEPTED
+    StatusCode::ACCEPTED.into_response()
 }
 
 #[tracing::instrument(skip(state))]
 async fn sse_handler(
-    State(state): State<McpState>,
-) -> Sse<impl Stream<Item = Result<Event, BroadcastStreamRecvError>>> {
+    State(mut state): State<McpState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     debug!("MCP client connected to the SSE handler");
 
-    // We will subscribe to the global sender and convert those messages into
-    // a stream, which in turn gets converted into SSE events.
-    let receiver = state.notifications.subscribe();
+    let (session_id, messages) = state.register_session().await;
 
     // This message needs to be send as soon as the client accesses the page.
-    let initial_event =
-        futures::stream::once(async { Ok(Event::default().event("endpoint").data("/messages")) });
+    let initial_event = futures::stream::once(async move {
+        let querystring = serde_urlencoded::to_string(JsonRpcQuery::new(Some(session_id)))
+            .expect("querystring encoding is expected to work");
+        Ok(Event::default()
+            .event("endpoint")
+            .data(format!("/messages?{querystring}")))
+    });
 
-    let events = BroadcastStream::new(receiver).map(|message| {
-        message.map(|message| {
-            Event::default()
-                .event("message")
-                .json_data(message)
-                .expect("unable to serialize data")
-        })
+    // This stream will contain all the ServerMessages which are converted to
+    // Sse Events.
+    let events = ReceiverStream::new(messages).map(|message| {
+        Ok(Event::default()
+            .event("message")
+            .json_data(message)
+            .expect("unable to serialize data"))
     });
 
     Sse::new(initial_event.chain(events)).keep_alive(

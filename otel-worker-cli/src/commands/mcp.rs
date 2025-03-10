@@ -1,22 +1,28 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
-use otel_worker_core::api::client::{self, ApiClient};
+use otel_worker_core::api::client::ApiClient;
 use otel_worker_core::api::models;
 use rust_mcp_schema::schema_utils::{
-    ClientJsonrpcRequest, ClientMessage, RequestFromClient, ResultFromServer, RpcErrorCodes,
-    ServerJsonrpcResponse, ServerMessage,
+    ClientJsonrpcRequest, ClientMessage, NotificationFromServer, RequestFromClient,
+    RequestFromServer, ResultFromServer, RpcErrorCodes, ServerJsonrpcNotification,
+    ServerJsonrpcRequest, ServerJsonrpcResponse, ServerMessage,
 };
 use rust_mcp_schema::{
     ClientRequest, Implementation, InitializeRequestParams, InitializeResult, JsonrpcError,
-    ListResourcesRequestParams, ListResourcesResult, PingRequestParams, ReadResourceRequestParams,
-    ReadResourceResult, ReadResourceResultContentsItem, Resource, ResourceListChangedNotification,
-    ServerCapabilities, ServerCapabilitiesResources, TextResourceContents,
+    JsonrpcErrorError, ListResourcesRequestParams, ListResourcesResult, PingRequestParams,
+    ReadResourceRequestParams, ReadResourceResult, ReadResourceResultContentsItem, RequestId,
+    Resource, ResourceListChangedNotification, ServerCapabilities, ServerCapabilitiesResources,
+    TextResourceContents,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 use url::Url;
+use uuid::Uuid;
 
 mod sse;
 mod stdio;
@@ -53,24 +59,22 @@ pub async fn handle_command(args: Args) -> Result<()> {
     // have to worry about error handling inside the [`tokio::task`].
     let websocket_url = get_ws_url(&args.otel_worker_url)?;
 
-    let api_client = client::builder(args.otel_worker_url)
+    let api_client = ApiClient::builder(args.otel_worker_url)
         .set_bearer_token(args.otel_worker_token)
         .build();
 
-    // This broadcast channel is used for async communication back to the MCP
-    // client.
-    let (notifications, _) = broadcast::channel(100);
+    let mcp_state = McpState::new(api_client);
 
-    let ws_sender = notifications.clone();
+    info!(?websocket_url, "Connecting to otel-worker websocket");
+    let (mut stream, _resp) = tokio_tungstenite::connect_async(&websocket_url)
+        .await
+        .with_context(|| {
+            format!("Unable to connect to the otel-worker websocket at {websocket_url}")
+        })?;
+    info!("Connected to otel-worker websocket");
+
+    let ws_state = mcp_state.clone();
     let ws_handle = tokio::spawn(async move {
-        info!(?websocket_url, "Connecting to otel-worker websocket");
-
-        let (mut stream, _resp) = tokio_tungstenite::connect_async(websocket_url)
-            .await
-            .expect("should be able to connect");
-
-        info!("Connected to otel-worker websocket");
-
         loop {
             let Some(Ok(message)) = stream.next().await else {
                 warn!("websocket client has stopped");
@@ -83,15 +87,12 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
                 // We are only interested in 1 event, so we just ignore everything else
                 if let models::ServerMessageDetails::SpanAdded(_span_added) = msg.details {
-                    let data = ResourceListChangedNotification::new(None);
-                    let message = ServerMessage::Notification(data.into());
-                    ws_sender.send(message).ok();
+                    let notification = ResourceListChangedNotification::new(None);
+                    ws_state.broadcast_notification(notification).await;
                 }
             }
         }
     });
-
-    let mcp_state = McpState::new(api_client, notifications);
 
     match args.transport {
         Transport::Stdio => stdio::serve(mcp_state).await?,
@@ -106,22 +107,118 @@ pub async fn handle_command(args: Args) -> Result<()> {
 #[derive(Clone)]
 struct McpState {
     api_client: ApiClient,
-    notifications: broadcast::Sender<ServerMessage>,
+    sessions: Arc<RwLock<HashMap<String, McpSession>>>,
 }
 
 impl McpState {
-    fn new(api_client: ApiClient, notifications: broadcast::Sender<ServerMessage>) -> Self {
+    fn new(api_client: ApiClient) -> Self {
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+
         Self {
             api_client,
-            notifications,
+            sessions,
         }
     }
 
-    /// Send a message to the MCP client using [`notifications`].
-    fn reply(&self, message: ServerMessage) {
-        if self.notifications.send(message).is_err() {
+    async fn register_session(&mut self) -> (String, mpsc::Receiver<ServerMessage>) {
+        loop {
+            let id = Uuid::new_v4().to_string();
+
+            let mut sessions = self.sessions.write().await;
+            match sessions.entry(id.clone()) {
+                Entry::Occupied(_) => continue,
+                Entry::Vacant(entry) => {
+                    let (mcp_session, messages) = McpSession::new();
+                    entry.insert(mcp_session);
+                    break (id, messages);
+                }
+            }
+        }
+    }
+
+    async fn get_session(&mut self, session_id: impl AsRef<str>) -> Option<McpSession> {
+        self.sessions.read().await.get(session_id.as_ref()).cloned()
+    }
+
+    /// Send a message to all MCP clients.
+    async fn broadcast(&self, message: ServerMessage) {
+        let sessions = self.sessions.read().await;
+
+        for session in sessions.values() {
+            session.send_message(message.clone()).await
+        }
+    }
+
+    /// Send a json-rpc notification to all MCP clients connected to this
+    /// instance.
+    #[allow(dead_code)]
+    async fn broadcast_notification(&self, notification: impl Into<NotificationFromServer>) {
+        let notification = ServerJsonrpcNotification::new(notification.into());
+        let message = ServerMessage::Notification(notification);
+        self.broadcast(message).await
+    }
+}
+
+#[derive(Debug, Clone)]
+struct McpSession {
+    /// This channel is used to send message to the receiver which should
+    /// send these message to the MCP client using the transport that is being
+    /// used.
+    ///
+    /// The receiver channel is returned during the creation of the [`McpSession`].
+    messages: mpsc::Sender<ServerMessage>,
+}
+
+impl McpSession {
+    /// Create a new [`McpSession`]. The [`mpsc::Receiver`] returned will
+    /// receive any message intended for the Mcp client.
+    pub fn new() -> (Self, mpsc::Receiver<ServerMessage>) {
+        let (messages_tx, messages_rx) = mpsc::channel(100);
+
+        (
+            Self {
+                messages: messages_tx,
+            },
+            messages_rx,
+        )
+    }
+
+    /// Send a message to this MCP client connected to this session.
+    async fn send_message(&self, message: ServerMessage) {
+        if self.messages.send(message).await.is_err() {
             warn!("A reply was send, but no client is connected");
         }
+    }
+
+    /// Send a json-rpc request to MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_request(&self, request_id: RequestId, request: impl Into<RequestFromServer>) {
+        let request = ServerJsonrpcRequest::new(request_id, request.into());
+        let message = ServerMessage::Request(request);
+        self.send_message(message).await
+    }
+
+    /// Send a json-rpc response to MCP client connected to this session.
+    async fn send_response(&self, request_id: RequestId, response: impl Into<ResultFromServer>) {
+        let response = ServerJsonrpcResponse::new(request_id, response.into());
+        let message = ServerMessage::Response(response);
+        self.send_message(message).await
+    }
+
+    /// Send a json-rpc error to MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_error(&self, request_id: RequestId, error: impl Into<JsonrpcErrorError>) {
+        let error = JsonrpcError::new(error.into(), request_id);
+        let message = ServerMessage::Error(error);
+        self.send_message(message).await
+    }
+
+    /// Send a json-rpc notification to the MCP client connected to this session.
+    #[allow(dead_code)]
+    async fn send_notification(&self, notification: impl Into<NotificationFromServer>) {
+        let notification = ServerJsonrpcNotification::new(notification.into());
+        let message = ServerMessage::Notification(notification);
+        self.send_message(message).await
     }
 }
 
@@ -152,8 +249,10 @@ fn get_ws_url(otel_worker_url: &url::Url) -> Result<http::Uri> {
 
 async fn handle_initialize(
     _state: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
     params: InitializeRequestParams,
-) -> Result<InitializeResult> {
+) -> Result<()> {
     debug!(?params, "Received initialize message");
 
     const MCP_VERSION: &str = "2024-11-05";
@@ -188,7 +287,7 @@ async fn handle_initialize(
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    let result = InitializeResult {
+    let message = InitializeResult {
         capabilities,
         instructions: Some(instructions.to_string()),
         meta: None,
@@ -196,13 +295,17 @@ async fn handle_initialize(
         server_info,
     };
 
-    Ok(result)
+    session.send_response(request_id, message).await;
+
+    Ok(())
 }
 
 async fn handle_resources_list(
     McpState { api_client, .. }: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
     _params: Option<ListResourcesRequestParams>,
-) -> Result<ListResourcesResult> {
+) -> Result<()> {
     let resources = api_client
         .trace_list(Some(50), None)
         .await?
@@ -221,19 +324,23 @@ async fn handle_resources_list(
         })
         .collect();
 
-    let result = ListResourcesResult {
+    let message = ListResourcesResult {
         meta: None,
         next_cursor: None,
         resources,
     };
 
-    Ok(result)
+    session.send_response(request_id, message).await;
+
+    Ok(())
 }
 
 async fn handle_resources_read(
     McpState { api_client, .. }: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
     params: ReadResourceRequestParams,
-) -> Result<ReadResourceResult> {
+) -> Result<()> {
     debug!(?params, "Received a call on resources_read");
 
     let Some((resource_type, arguments)) = params.uri.split_once("://") else {
@@ -258,22 +365,30 @@ async fn handle_resources_read(
         resource_type => bail!("unknown resource type: {}", resource_type),
     };
 
-    let result = ReadResourceResult {
+    let message = ReadResourceResult {
         contents,
         meta: None,
     };
 
-    Ok(result)
+    session.send_response(request_id, message).await;
+
+    Ok(())
 }
 
 async fn handle_ping(
     _state: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
     _params: Option<PingRequestParams>,
-) -> Result<rust_mcp_schema::Result> {
-    Ok(rust_mcp_schema::Result {
+) -> Result<()> {
+    let message = rust_mcp_schema::Result {
         meta: None,
         extra: None,
-    })
+    };
+
+    session.send_response(request_id, message).await;
+
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone, clap::ValueEnum, Serialize, Deserialize)]
@@ -285,78 +400,91 @@ pub enum Transport {
     Sse,
 }
 
-async fn handle_client_message(state: &McpState, client_message: ClientMessage) {
+async fn handle_client_message(
+    state: &McpState,
+    session: &McpSession,
+    client_message: ClientMessage,
+) {
     match client_message {
         ClientMessage::Request(request) => {
-            handle_client_request(state, request).await;
+            handle_client_request(state, session, request).await;
         }
         ClientMessage::Notification(notification) => {
-            handle_client_notification(notification).await;
+            handle_client_notification(state, session, notification).await;
         }
         ClientMessage::Response(response) => {
-            handle_client_response(response).await;
+            handle_client_response(state, session, response).await;
         }
         ClientMessage::Error(error) => {
-            handle_client_error(error).await;
+            handle_client_error(state, session, error).await;
         }
     }
 }
 
-async fn handle_client_request(state: &McpState, request: ClientJsonrpcRequest) {
-    let result: Result<ResultFromServer> = match request.request {
+async fn handle_client_request(
+    state: &McpState,
+    session: &McpSession,
+    request: ClientJsonrpcRequest,
+) {
+    let request_id = request.id.clone();
+
+    let result = match request.request {
         RequestFromClient::ClientRequest(client_request) => match client_request {
             ClientRequest::InitializeRequest(inner_request) => {
-                handle_initialize(state, inner_request.params)
-                    .await
-                    .map(Into::into)
+                handle_initialize(state, session, request.id, inner_request.params).await
             }
             ClientRequest::ListResourcesRequest(inner_request) => {
-                handle_resources_list(state, inner_request.params)
-                    .await
-                    .map(Into::into)
+                handle_resources_list(state, session, request.id, inner_request.params).await
             }
             ClientRequest::ReadResourceRequest(inner_request) => {
-                handle_resources_read(state, inner_request.params)
-                    .await
-                    .map(Into::into)
+                handle_resources_read(state, session, request.id, inner_request.params).await
             }
-            ClientRequest::PingRequest(inner_request) => handle_ping(state, inner_request.params)
-                .await
-                .map(Into::into),
+            ClientRequest::PingRequest(inner_request) => {
+                handle_ping(state, session, request.id, inner_request.params).await
+            }
             _inner_request => {
-                error!(method = request.method, "Received unsupported requests");
-                return;
+                error!(
+                    method = request.method,
+                    "received unsupported json-rpc message"
+                );
+                Err(anyhow!("received unsupported json-rpc message"))
             }
         },
         RequestFromClient::CustomRequest(_value) => {
-            error!("received unsupported custom message");
-            return;
+            error!(
+                method = request.method,
+                "received unsupported json-rpc message"
+            );
+            Err(anyhow!("received unsupported json-rpc message"))
         }
     };
 
-    let response = match result {
-        Ok(result) => ServerMessage::Response(ServerJsonrpcResponse::new(request.id, result)),
-        Err(_err) => ServerMessage::Error(JsonrpcError::create(
-            request.id,
-            RpcErrorCodes::INTERNAL_ERROR,
-            "error_message".to_string(),
-            None,
-        )),
-    };
-
-    state.reply(response);
+    if let Err(err) = result {
+        session
+            .send_error(
+                request_id,
+                JsonrpcErrorError::new(RpcErrorCodes::INTERNAL_ERROR, err.to_string(), None),
+            )
+            .await;
+    }
 }
 
 async fn handle_client_notification(
+    _state: &McpState,
+    _session: &McpSession,
     notification: rust_mcp_schema::schema_utils::ClientJsonrpcNotification,
 ) {
     info!(?notification, "Received a notification!");
 }
 
-async fn handle_client_response(response: rust_mcp_schema::schema_utils::ClientJsonrpcResponse) {
+async fn handle_client_response(
+    _state: &McpState,
+    _session: &McpSession,
+    response: rust_mcp_schema::schema_utils::ClientJsonrpcResponse,
+) {
     info!(?response, "Received a response!");
 }
 
-async fn handle_client_error(error: JsonrpcError) {
+async fn handle_client_error(_state: &McpState, _session: &McpSession, error: JsonrpcError) {
     info!(?error, "Received a client error!");
 }
