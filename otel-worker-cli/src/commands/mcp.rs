@@ -431,16 +431,16 @@ async fn handle_client_request(
     let result = match request.request {
         RequestFromClient::ClientRequest(client_request) => match client_request {
             ClientRequest::InitializeRequest(inner_request) => {
-                handle_initialize(state, &session, request.id, inner_request.params).await
+                handle_initialize(state, session, request.id, inner_request.params).await
             }
             ClientRequest::ListResourcesRequest(inner_request) => {
-                handle_resources_list(state, &session, request.id, inner_request.params).await
+                handle_resources_list(state, session, request.id, inner_request.params).await
             }
             ClientRequest::ReadResourceRequest(inner_request) => {
-                handle_resources_read(state, &session, request.id, inner_request.params).await
+                handle_resources_read(state, session, request.id, inner_request.params).await
             }
             ClientRequest::PingRequest(inner_request) => {
-                handle_ping(state, &session, request.id, inner_request.params).await
+                handle_ping(state, session, request.id, inner_request.params).await
             }
             _inner_request => {
                 error!(
