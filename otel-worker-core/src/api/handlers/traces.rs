@@ -17,7 +17,9 @@ pub async fn traces_list_handler(
 ) -> Result<Json<Vec<TraceSummary>>, ApiServerError<TraceListError>> {
     let tx = store.start_readonly_transaction().await?;
 
-    let traces = store.traces_list(&tx, params.limit, params.time.map(Into::into)).await?;
+    let traces = store
+        .traces_list(&tx, params.limit, params.time.map(Into::into))
+        .await?;
 
     let mut result = Vec::with_capacity(20);
 
