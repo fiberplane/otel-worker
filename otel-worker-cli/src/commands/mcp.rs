@@ -2,19 +2,22 @@ use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
 use otel_worker_core::api::client::ApiClient;
 use otel_worker_core::api::models;
+use otel_worker_core::data::models::HexEncodedId;
 use rust_mcp_schema::schema_utils::{
     ClientJsonrpcRequest, ClientMessage, NotificationFromServer, RequestFromClient,
     RequestFromServer, ResultFromServer, RpcErrorCodes, ServerJsonrpcNotification,
     ServerJsonrpcRequest, ServerJsonrpcResponse, ServerMessage,
 };
 use rust_mcp_schema::{
-    ClientRequest, Implementation, InitializeRequestParams, InitializeResult, JsonrpcError,
-    JsonrpcErrorError, ListResourcesRequestParams, ListResourcesResult, PingRequestParams,
+    CallToolRequestParams, CallToolResult, ClientRequest, Implementation, InitializeRequestParams,
+    InitializeResult, JsonrpcError, JsonrpcErrorError, ListResourcesRequestParams,
+    ListResourcesResult, ListToolsRequestParams, ListToolsResult, PingRequestParams,
     ReadResourceRequestParams, ReadResourceResult, ReadResourceResultContentsItem, RequestId,
     Resource, ResourceListChangedNotification, ServerCapabilities, ServerCapabilitiesResources,
-    TextResourceContents,
+    ServerCapabilitiesTools, TextResourceContents, Tool, ToolInputSchema,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -277,7 +280,7 @@ async fn handle_initialize(
             list_changed: Some(true),
             subscribe: None,
         }),
-        tools: None,
+        tools: Some(ServerCapabilitiesTools { list_changed: None }),
     };
 
     // TODO: Use better instructions
@@ -391,6 +394,117 @@ async fn handle_ping(
     Ok(())
 }
 
+async fn handle_tools_list(
+    _state: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
+    _params: Option<ListToolsRequestParams>,
+) -> Result<()> {
+    let response = ListToolsResult {
+        meta: None,
+        next_cursor: None,
+        tools: vec![Tool {
+            description: Some("Retrieve the raw trace for a single trace".to_string()),
+            input_schema: GetTraceParams::tool_input_schema(),
+            name: "get_trace".to_string(),
+        }],
+    };
+    session.send_response(request_id, response).await;
+    Ok(())
+}
+
+async fn handle_tool_call(
+    state: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
+    params: CallToolRequestParams,
+) -> Result<()> {
+    match params.name.as_str() {
+        "get_trace" => match params.arguments.try_into() {
+            Ok(params) => handle_tool_call_get_trace(state, session, request_id, params).await,
+            Err(_) => {
+                session
+                    .send_error(request_id, JsonrpcErrorError::invalid_params())
+                    .await;
+                Ok(())
+            }
+        },
+        name => {
+            warn!(?name, "Unsupported tool was called");
+            session
+                .send_error(request_id, JsonrpcErrorError::method_not_found())
+                .await;
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid parameters were provided")]
+pub struct InvalidParameters;
+
+/// Parameters associated with the "get_trace" tool.
+pub struct GetTraceParams {
+    pub trace_id: HexEncodedId,
+}
+
+impl GetTraceParams {
+    /// Get the [`ToolInputSchema`] associated with [`GetTraceParams`].
+    pub fn tool_input_schema() -> ToolInputSchema {
+        // TODO: Add automatic schema generation based on the struct.
+        let mut properties = HashMap::new();
+        let trace_id_props = {
+            let mut trace_id_props = serde_json::Map::new();
+            trace_id_props.insert(
+                "type".to_string(),
+                serde_json::Value::String("string".to_string()),
+            );
+            trace_id_props.insert(
+                "description".to_string(),
+                serde_json::Value::String("The value of the trace it to retrieve".to_string()),
+            );
+            trace_id_props
+        };
+        properties.insert("trace_id".to_string(), trace_id_props);
+        ToolInputSchema::new(Some(properties), vec!["trace_id".to_string()])
+    }
+}
+
+impl TryFrom<Option<Map<String, Value>>> for GetTraceParams {
+    type Error = InvalidParameters;
+
+    fn try_from(map: Option<Map<String, Value>>) -> std::result::Result<Self, Self::Error> {
+        // TODO: Add automatic parsing and validation based on the json schema
+        match map
+            .ok_or(InvalidParameters)?
+            .remove("trace_id")
+            .ok_or(InvalidParameters)?
+        {
+            Value::String(trace_id) => {
+                // TODO: Implement more granular error message types.
+                let trace_id = trace_id.parse().map_err(|_| InvalidParameters)?;
+                Ok(GetTraceParams { trace_id })
+            }
+            _ => Err(InvalidParameters),
+        }
+    }
+}
+
+async fn handle_tool_call_get_trace(
+    state: &McpState,
+    session: &McpSession,
+    request_id: RequestId,
+    params: GetTraceParams,
+) -> std::result::Result<(), anyhow::Error> {
+    let trace = state.api_client.trace_get(params.trace_id).await?;
+    let response = CallToolResult::text_content(
+        serde_json::to_string(&trace).expect("unable to serialize to trace"),
+        None,
+    );
+    session.send_response(request_id, response).await;
+    Ok(())
+}
+
 #[derive(Debug, Default, Clone, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Transport {
@@ -442,6 +556,12 @@ async fn handle_client_request(
             ClientRequest::PingRequest(inner_request) => {
                 handle_ping(state, session, request.id, inner_request.params).await
             }
+            ClientRequest::ListToolsRequest(inner_request) => {
+                handle_tools_list(state, session, request.id, inner_request.params).await
+            }
+            ClientRequest::CallToolRequest(inner_request) => {
+                handle_tool_call(state, session, request.id, inner_request.params).await
+            }
             _inner_request => {
                 error!(
                     method = request.method,
@@ -460,6 +580,7 @@ async fn handle_client_request(
     };
 
     if let Err(err) = result {
+        warn!(?err, "Unable to handle client request");
         session
             .send_error(
                 request_id,

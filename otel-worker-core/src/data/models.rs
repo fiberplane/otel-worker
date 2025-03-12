@@ -166,6 +166,12 @@ impl Display for HexEncodedId {
     }
 }
 
+impl AsRef<str> for HexEncodedId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 struct HexEncodedIdVisitor;
 
 impl<'de> Visitor<'de> for HexEncodedIdVisitor {
