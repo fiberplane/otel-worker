@@ -50,15 +50,21 @@ You can configure the token using the `AUTH_TOKEN` environment variable (see bel
 To get started you will need to make sure that you have Rust and wrangler
 installed. See their respective documentation for installation instructions.
 
-Using the wrangler CLI you need to create a new D1 database to use and then
-apply all the migrations on it:
+There are three steps to set up the database:
+
+1. Create the database
+2. Update the wrangler.toml file to include the database name and id
+3. Apply the migrations
+
+Create a new D1 database using the wrangler CLI:
 
 ```sh
 npx wrangler d1 create fiberplane-otel-db
-npx wrangler d1 migrations apply fiberplane-otel-db
 ```
 
-Update your `wrangler.toml` file to include the database name and id:
+The output of the command will include the database id, which you will need to update in the `wrangler.toml` file.
+
+Update your `wrangler.toml` as follows:
 
 ```toml
 database_name = "fiberplane-otel-db"
@@ -66,15 +72,23 @@ database_name = "fiberplane-otel-db"
 database_id = "id-of-fiberplane-otel-db"
 ```
 
+Apply the migrations:
+
+```sh
+npx wrangler d1 migrations apply fiberplane-otel-db
+```
+
 You only need to create the database once, but you might have to run the
 migrations for new versions of the `otel-worker`.
 
-Next, copy `.dev.vars.example` to `.dev.vars` and set the `AUTH_TOKEN` to a value
-of your choice:
+As a final step, copy the file `otel-worker/.dev.vars.example` to `otel-worker/.dev.vars` and set the `AUTH_TOKEN` to a value of your choice. For local development, you can keep the default value:
 
 ```sh
 AUTH_TOKEN="your-secret-token-here"
 ```
+
+This configures the otel worker with a secret token that is used to authenticate
+requests to the api endpoints.
 
 You can now run `otel-worker` using the wrangler CLI:
 
@@ -86,7 +100,7 @@ npx wrangler dev
 ```
 
 The Rust code will be compiled and once that is finished a local server will be
-running on `http://localhost:8787`. You can send traces using any OTLP/HTTP
+running on `http://localhost:24318`. You can send traces using any OTLP/HTTP
 compatible exporter and inspect the traces using the
 [`client`](../otel-worker-cli).
 

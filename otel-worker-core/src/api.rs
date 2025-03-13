@@ -1,6 +1,7 @@
 use crate::data::BoxedStore;
 use crate::otel::OtelTraceLayer;
 use crate::service::Service;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::FromRef;
 use axum::routing::{get, post};
 use http::StatusCode;
@@ -59,7 +60,11 @@ impl Builder {
         let api_state = ApiState { service, store };
 
         let router = axum::Router::new()
-            .route("/v1/traces", post(handlers::otel::trace_collector_handler))
+            .route(
+                "/v1/traces",
+                post(handlers::otel::trace_collector_handler)
+                    .layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+            )
             .route("/v1/traces", get(handlers::traces::traces_list_handler))
             .route(
                 "/v1/traces/:trace_id",

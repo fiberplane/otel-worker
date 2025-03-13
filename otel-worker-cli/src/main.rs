@@ -4,7 +4,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig};
 use opentelemetry_sdk::{runtime, Resource};
-use std::env;
+use std::{env, io};
 use tracing::trace;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -55,7 +55,7 @@ fn setup_tracing(args: &commands::Args) -> Result<()> {
         EnvFilter::builder().parse(directives)?
     };
 
-    let log_layer = tracing_subscriber::fmt::layer();
+    let log_layer = tracing_subscriber::fmt::layer().with_writer(io::stderr);
 
     let trace_layer = if args.enable_tracing {
         let exporter = SpanExporter::builder()

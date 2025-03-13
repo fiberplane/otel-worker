@@ -3,7 +3,7 @@ use crate::api::models::SpanKind;
 use crate::data::util::{Json, Timestamp};
 use serde::de::{Error, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
@@ -157,6 +157,18 @@ impl From<HexEncodedId> for wasm_bindgen::JsValue {
 impl From<&HexEncodedId> for wasm_bindgen::JsValue {
     fn from(value: &HexEncodedId) -> Self {
         wasm_bindgen::JsValue::from_str(value.as_inner())
+    }
+}
+
+impl Display for HexEncodedId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl AsRef<str> for HexEncodedId {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
