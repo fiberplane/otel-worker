@@ -175,13 +175,20 @@ impl McpState {
     }
 
     /// Initiate the shutdown process.
-    fn shutdown(&self) {
+    async fn shutdown(&self) {
         if self.is_shutting_down() {
             return;
         }
 
+        // Mark the instance as shutdown
         self.shutdown.store(true, Ordering::Relaxed);
-        // TODO: Broadcast shutdown signal to all existing sessions
+
+        // Go through all the sessions and drop them. This makes sure that the
+        // receiver will also be closed since all the transmitters will be gone.
+        let mut sessions = self.sessions.write().await;
+        for (session_id, _mcp_session) in sessions.drain() {
+            debug!(?session_id, "Closing session");
+        }
     }
 
     /// Checks if the current server instance is shutting down.

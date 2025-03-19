@@ -166,7 +166,7 @@ async fn shutdown_requested(state: McpState) {
 
     info!("Received SIGINT, shutting down api server");
 
-    state.shutdown();
+    state.shutdown().await;
 
     // Monitor for another SIGINT, and force shutdown if received.
     tokio::spawn(async {
