@@ -6,7 +6,7 @@ use axum::response::sse::Event;
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::Json;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use http::StatusCode;
 use rust_mcp_schema::schema_utils::ClientMessage;
 use serde::{Deserialize, Serialize};
@@ -27,10 +27,10 @@ pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
         "Starting MCP server",
     );
 
-    let mcp_service = build_mcp_service(state);
+    let mcp_service = build_mcp_service(state.clone());
 
     axum::serve(listener, mcp_service)
-        .with_graceful_shutdown(shutdown_requested())
+        .with_graceful_shutdown(shutdown_requested(state))
         .await?;
 
     Ok(())
@@ -86,10 +86,13 @@ async fn json_rpc_handler(
 }
 
 #[tracing::instrument(skip(state))]
-async fn sse_handler(
-    State(mut state): State<McpState>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+async fn sse_handler(State(mut state): State<McpState>) -> Response {
     debug!("MCP client connected to the SSE handler");
+
+    // Do not accept anymore clients if the server is shutting down.
+    if state.is_shutting_down() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "server is shutting down").into_response();
+    }
 
     let (session_id, messages) = state.register_session().await;
 
@@ -97,25 +100,30 @@ async fn sse_handler(
     let initial_event = futures::stream::once(async move {
         let querystring = serde_urlencoded::to_string(JsonRpcQuery::new(Some(session_id)))
             .expect("querystring encoding is expected to work");
-        Ok(Event::default()
+        // We need to explicitly specify the error type, since we are not
+        // constructing this anywhere
+
+        Event::default()
             .event("endpoint")
-            .data(format!("/messages?{querystring}")))
+            .data(format!("/messages?{querystring}"))
     });
 
     // This stream will contain all the ServerMessages which are converted to
     // Sse Events.
     let events = ReceiverStream::new(messages).map(|message| {
-        Ok(Event::default()
+        Event::default()
             .event("message")
             .json_data(message)
-            .expect("unable to serialize data"))
+            .expect("unable to serialize data")
     });
 
-    Sse::new(initial_event.chain(events)).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(5))
-            .text("keep-alive-text"),
-    )
+    Sse::new(initial_event.chain(events).map(Ok::<Event, Infallible>))
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(5))
+                .text("keep-alive-text"),
+        )
+        .into_response()
 }
 
 async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
@@ -151,12 +159,14 @@ async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
 /// Another SIGINT listener task is spawned just before resolving this task,
 /// which will forcefully exit the application. This is to prevent not being
 /// able to shutdown, if the graceful shutdown doesn't work.
-async fn shutdown_requested() {
+async fn shutdown_requested(state: McpState) {
     tokio::signal::ctrl_c()
         .await
         .expect("Failed to listen for ctrl-c");
 
     info!("Received SIGINT, shutting down api server");
+
+    state.shutdown();
 
     // Monitor for another SIGINT, and force shutdown if received.
     tokio::spawn(async {

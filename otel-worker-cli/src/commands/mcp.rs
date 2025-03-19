@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
@@ -109,17 +110,29 @@ pub async fn handle_command(args: Args) -> Result<()> {
 
 #[derive(Clone)]
 struct McpState {
+    /// A single ApiClient that is used by all the [`McpSession`]'s. This allows
+    /// for connection re-use. ApiClient itself is a [`Arc`] wrapped, hence we
+    /// just use it without having to wrap it ourselves in a [`Arc`].
     api_client: ApiClient,
+
+    /// This stores a reference to all the sessions by its session id.
     sessions: Arc<RwLock<HashMap<String, McpSession>>>,
+
+    /// [`shutdown`] indicates that the server has received a terminate signal
+    /// and is in the process of shutting down. This means that no new
+    /// connections are accepted.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl McpState {
     fn new(api_client: ApiClient) -> Self {
         let sessions = Arc::new(RwLock::new(HashMap::new()));
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         Self {
             api_client,
             sessions,
+            shutdown,
         }
     }
 
@@ -159,6 +172,21 @@ impl McpState {
         let notification = ServerJsonrpcNotification::new(notification.into());
         let message = ServerMessage::Notification(notification);
         self.broadcast(message).await
+    }
+
+    /// Initiate the shutdown process.
+    fn shutdown(&self) {
+        if self.is_shutting_down() {
+            return;
+        }
+
+        self.shutdown.store(true, Ordering::Relaxed);
+        // TODO: Broadcast shutdown signal to all existing sessions
+    }
+
+    /// Checks if the current server instance is shutting down.
+    fn is_shutting_down(&self) -> bool {
+        self.shutdown.load(Ordering::Relaxed)
     }
 }
 
