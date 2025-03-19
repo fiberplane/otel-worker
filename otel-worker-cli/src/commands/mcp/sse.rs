@@ -2,7 +2,7 @@ use super::McpState;
 use anyhow::{Context, Result};
 use axum::extract::{MatchedPath, Query, Request, State};
 use axum::middleware::{self, Next};
-use axum::response::sse::Event;
+use axum::response::sse::{Event, KeepAlive};
 use axum::response::{IntoResponse, Response, Sse};
 use axum::routing::{get, post};
 use axum::Json;
@@ -118,11 +118,7 @@ async fn sse_handler(State(mut state): State<McpState>) -> Response {
     });
 
     Sse::new(initial_event.chain(events).map(Ok::<Event, Infallible>))
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(Duration::from_secs(5))
-                .text("keep-alive-text"),
-        )
+        .keep_alive(KeepAlive::new())
         .into_response()
 }
 
