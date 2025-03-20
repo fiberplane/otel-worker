@@ -22,7 +22,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, watch, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -136,7 +136,7 @@ impl McpState {
         }
     }
 
-    async fn register_session(&mut self) -> (String, mpsc::Receiver<ServerMessage>) {
+    async fn register_session(&mut self) -> (McpSession, mpsc::Receiver<ServerMessage>) {
         loop {
             let id = Uuid::new_v4().to_string();
 
@@ -144,9 +144,9 @@ impl McpState {
             match sessions.entry(id.clone()) {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(entry) => {
-                    let (mcp_session, messages) = McpSession::new();
-                    entry.insert(mcp_session);
-                    break (id, messages);
+                    let (session, messages) = McpSession::new(id);
+                    entry.insert(session.clone());
+                    break (session, messages);
                 }
             }
         }
@@ -186,7 +186,8 @@ impl McpState {
         // Go through all the sessions and drop them. This makes sure that the
         // receiver will also be closed since all the transmitters will be gone.
         let mut sessions = self.sessions.write().await;
-        for (session_id, _mcp_session) in sessions.drain() {
+        for (session_id, session) in sessions.drain() {
+            session.shutdown().await;
             debug!(?session_id, "Closing session");
         }
     }
@@ -195,27 +196,48 @@ impl McpState {
     fn is_shutting_down(&self) -> bool {
         self.shutdown.load(Ordering::Relaxed)
     }
+
+    async fn cleanup_session(&self, session_id: String) {
+        debug!(?session_id, "Cleaning up session");
+
+        let mut sessions = self.sessions.write().await;
+        match sessions.remove(&session_id) {
+            Some(session) => {
+                session.shutdown().await;
+                debug!(?session_id, "Cleanup successful");
+            }
+            None => warn!(?session_id, "Cleanup attempted but session was not found"),
+        };
+    }
 }
 
 #[derive(Debug, Clone)]
 struct McpSession {
+    /// An ID unique to this session
+    id: String,
+
     /// This channel is used to send message to the receiver which should
     /// send these message to the MCP client using the transport that is being
     /// used.
     ///
     /// The receiver channel is returned during the creation of the [`McpSession`].
     messages: mpsc::Sender<ServerMessage>,
+
+    shutdown: watch::Sender<bool>,
 }
 
 impl McpSession {
     /// Create a new [`McpSession`]. The [`mpsc::Receiver`] returned will
     /// receive any message intended for the Mcp client.
-    pub fn new() -> (Self, mpsc::Receiver<ServerMessage>) {
+    pub fn new(id: String) -> (Self, mpsc::Receiver<ServerMessage>) {
+        let (shutdown, _on_shutdown) = watch::channel(false);
         let (messages_tx, messages_rx) = mpsc::channel(100);
 
         (
             Self {
+                id,
                 messages: messages_tx,
+                shutdown,
             },
             messages_rx,
         )
@@ -257,6 +279,21 @@ impl McpSession {
         let notification = ServerJsonrpcNotification::new(notification.into());
         let message = ServerMessage::Notification(notification);
         self.send_message(message).await
+    }
+
+    /// Completes when the underlying session is closed.
+    async fn on_shutdown(&self) {
+        self.shutdown.subscribe().changed().await;
+    }
+
+    async fn shutdown(&self) {
+        self.shutdown.send(true);
+    }
+
+    /// Completes when the messages channel's receiver side closes. Currently
+    /// used by the sse implementation, when the client closes the sse page.
+    async fn on_messages_close(&self) {
+        self.messages.closed().await
     }
 }
 
@@ -449,14 +486,14 @@ async fn handle_tools_list(
 }
 
 async fn handle_tool_call(
-    state: &McpState,
+    McpState { api_client, .. }: &McpState,
     session: &McpSession,
     request_id: RequestId,
     params: CallToolRequestParams,
 ) -> Result<()> {
     match params.name.as_str() {
         "get_trace" => match params.arguments.try_into() {
-            Ok(params) => handle_tool_call_get_trace(state, session, request_id, params).await,
+            Ok(params) => handle_tool_call_get_trace(api_client, session, request_id, params).await,
             Err(_) => {
                 session
                     .send_error(request_id, JsonrpcErrorError::invalid_params())
@@ -526,12 +563,12 @@ impl TryFrom<Option<Map<String, Value>>> for GetTraceParams {
 }
 
 async fn handle_tool_call_get_trace(
-    state: &McpState,
+    api_client: &ApiClient,
     session: &McpSession,
     request_id: RequestId,
     params: GetTraceParams,
 ) -> std::result::Result<(), anyhow::Error> {
-    let trace = state.api_client.trace_get(params.trace_id).await?;
+    let trace = api_client.trace_get(params.trace_id).await?;
     let response = CallToolResult::text_content(
         serde_json::to_string(&trace).expect("unable to serialize to trace"),
         None,

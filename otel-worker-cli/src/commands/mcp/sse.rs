@@ -15,7 +15,7 @@ use std::process::exit;
 use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, info, info_span, warn, Instrument};
+use tracing::{debug, info, info_span, trace, warn, Instrument};
 
 pub(crate) async fn serve(listen_address: &str, state: McpState) -> Result<()> {
     let listener = TcpListener::bind(listen_address)
@@ -94,14 +94,36 @@ async fn sse_handler(State(mut state): State<McpState>) -> Response {
         return (StatusCode::SERVICE_UNAVAILABLE, "server is shutting down").into_response();
     }
 
-    let (session_id, messages) = state.register_session().await;
+    let (session, messages) = state.register_session().await;
+    let session_id = session.id.clone();
+
+    // Spawn a task which will cleanup the session once the client disconnects
+    let cleanup_state = state.clone();
+    tokio::spawn(async move {
+        let state = cleanup_state;
+
+        tokio::select! {
+            _ = session.on_messages_close() => {
+                debug!(session_id=?session.id, "Session has disconnected");
+
+                // If we are shutting down we don't want to do any cleanup since that is
+                // already happening and we would battle for the rwlock.
+                if state.is_shutting_down() {
+                    return;
+                }
+
+                state.cleanup_session(session.id).await;
+            },
+            _ = session.on_shutdown() => {
+                trace!(session_id=?session.id, "Watchdog stopped");
+            }
+        };
+    });
 
     // This message needs to be send as soon as the client accesses the page.
     let initial_event = futures::stream::once(async move {
         let querystring = serde_urlencoded::to_string(JsonRpcQuery::new(Some(session_id)))
             .expect("querystring encoding is expected to work");
-        // We need to explicitly specify the error type, since we are not
-        // constructing this anywhere
 
         Event::default()
             .event("endpoint")
@@ -117,6 +139,8 @@ async fn sse_handler(State(mut state): State<McpState>) -> Response {
             .expect("unable to serialize data")
     });
 
+    // We need to explicitly specify the error type in map, since we are not
+    // constructing this type anywhere
     Sse::new(initial_event.chain(events).map(Ok::<Event, Infallible>))
         .keep_alive(KeepAlive::new())
         .into_response()
@@ -128,8 +152,8 @@ async fn log_and_metrics(req: Request, next: Next) -> impl IntoResponse {
     let method = req.method().to_string();
     let matched_path = req
         .extensions()
-        .get::<MatchedPath>()
-        .map(|p| p.as_str().to_string());
+        .get()
+        .map(|p: &MatchedPath| p.as_str().to_string());
 
     let span = info_span!("http_request",
         %method,

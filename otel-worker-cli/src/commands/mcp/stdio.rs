@@ -8,11 +8,7 @@ use tracing::{debug, error, info};
 pub(crate) async fn serve(mut state: McpState) -> Result<()> {
     // Stdio only has support for a single session, so just start that at the
     // beginning and use it throughout the life cycle.
-    let (session_id, mut messages) = state.register_session().await;
-    let session = state
-        .get_session(session_id)
-        .await
-        .expect("should have session");
+    let (session, mut messages) = state.register_session().await;
 
     // spawn two tasks, one to read lines on stdin, parse payloads, and dispatch
     // to super::*. The other has to read from messages and serialize them
