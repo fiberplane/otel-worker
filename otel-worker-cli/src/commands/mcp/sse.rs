@@ -12,7 +12,7 @@ use rust_mcp_schema::schema_utils::ClientMessage;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::process::exit;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, info_span, warn, Instrument};
