@@ -61,7 +61,7 @@ serde_with = { version = "3.8.1" }
 strum = { version = "0.26", features = ["derive"] }
 thiserror = { version = "2.0" }
 time = { version = "0.3.17", features = ["serde-human-readable"] }
-tokio = { version = "1.40", features = ["rt-multi-thread", "signal", "fs"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "signal", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = { version = "0.24", features = [
     "rustls-tls-webpki-roots",
